@@ -65,4 +65,4 @@ def parse_args(args=None):
 
 if __name__ == '__main__':
     args = parse_args()
-    main('.', 'python-package-template', args.new_name)
+    main('.', 'zmq-plugin', args.new_name)

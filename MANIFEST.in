@@ -2,6 +2,6 @@ include RELEASE-VERSION
 include version.py
 include setup.py
 include paver-minilib.zip
-recursive-include python_package_template *
-recursive-exclude python_package_template *.pyc
-recursive-exclude python_package_template *~
+recursive-include zmq_plugin *
+recursive-exclude zmq_plugin *.pyc
+recursive-exclude zmq_plugin *~
