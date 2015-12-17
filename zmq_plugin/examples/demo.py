@@ -8,7 +8,7 @@ from zmq.eventloop import ioloop, zmqstream
 logger = logging.getLogger(__name__)
 
 
-def run_task(task):
+def run_hub(task):
     logging.basicConfig(level=logging.DEBUG)
 
     task.reset()
@@ -29,6 +29,27 @@ def run_task(task):
         logger.warning('IOLoop already running.')
 
 
+def run_plugin(task):
+    logging.basicConfig(level=logging.DEBUG)
+
+    task.reset()
+
+    # Register on receive callback.
+    task.command_stream = zmqstream.ZMQStream(task.command_socket)
+    task.command_stream.on_recv(task.on_command_recv)
+
+    # Register on receive callback.
+    task.query_stream = zmqstream.ZMQStream(task.subscribe_socket)
+    task.query_stream.on_recv(task.on_subscribe_recv)
+
+    try:
+        ioloop.install()
+        logger.info('Starting plugin %s ioloop' % task.name)
+        ioloop.IOLoop.instance().start()
+    except RuntimeError:
+        logger.warning('IOLoop already running.')
+
+
 if __name__ == '__main__':
     import time
     from ..hub import Hub
@@ -36,15 +57,18 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG)
 
-    hub_process = Process(target=run_task,
+    hub_process = Process(target=run_hub,
                           args=(Hub('tcp://*:12345', 'hub') ,))
     hub_process.daemon = False
     hub_process.start()
 
-    print '\n' + (72 * '=') + '\n'
+    plugin_process = Process(target=run_plugin,
+                             args=[Plugin('plugin_a',
+                                          'tcp://localhost:12345')])
+    plugin_process.daemon = False
+    plugin_process.start()
 
-    plugin_a = Plugin('plugin_a', 'tcp://localhost:12345')
-    plugin_a.reset()
+    print '\n' + (72 * '=') + '\n'
 
     plugin_b = Plugin('plugin_b', 'tcp://localhost:12345')
     plugin_b.reset()
@@ -56,24 +80,11 @@ if __name__ == '__main__':
         logger.info('''Send "ping" from `'plugin_b'` `'plugin_a'`''')
         plugin_b.send_command('plugin_a', 'ping')
 
-        logger.info('''Wait for command request to be received by `'plugin_a'`''')
-        frames = plugin_a.command_recv()
-        plugin_a.on_command_recv(frames)
-
         logger.info('''Wait for command response to be received by `'plugin_b'`''')
         frames = plugin_b.command_recv()
         plugin_b.on_command_recv(frames)
 
         print '\n' + (72 * '-') + '\n'
-
-    print '# Plugin A subscribed message dump #\n'
-
-    while True:
-        try:
-            logger.info(pprint.pformat(plugin_a.subscribe_socket
-                                       .recv_pyobj(zmq.NOBLOCK)))
-        except zmq.Again:
-            break
 
     print '\n# Plugin B subscribed message dump #\n'
 
@@ -84,4 +95,5 @@ if __name__ == '__main__':
         except zmq.Again:
             break
 
+    plugin_process.terminate()
     hub_process.terminate()

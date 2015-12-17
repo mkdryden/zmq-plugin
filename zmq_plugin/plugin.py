@@ -1,4 +1,5 @@
 # coding: utf-8
+from pprint import pformat
 import re
 import logging
 import itertools
@@ -118,3 +119,11 @@ class Plugin(object):
     def command_recv(self, *args, **kwargs):
         frames = self.command_socket.recv_multipart(*args, **kwargs)
         return frames
+
+    def on_subscribe_recv(self, msg_frames):
+        import cPickle as pickle
+
+        try:
+            logger.info(pformat(pickle.loads(msg_frames[0])))
+        except:
+            logger.error('Deserialization error', exc_info=True)
