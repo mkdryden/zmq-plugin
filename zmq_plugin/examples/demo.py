@@ -1,6 +1,8 @@
+import pprint
 from multiprocessing import Process
 import logging
 
+import zmq
 from zmq.eventloop import ioloop, zmqstream
 
 logger = logging.getLogger(__name__)
@@ -63,5 +65,23 @@ if __name__ == '__main__':
         plugin_b.on_command_recv(frames)
 
         print '\n' + (72 * '-') + '\n'
+
+    print '# Plugin A subscribed message dump #\n'
+
+    while True:
+        try:
+            logger.info(pprint.pformat(plugin_a.subscribe_socket
+                                       .recv_pyobj(zmq.NOBLOCK)))
+        except zmq.Again:
+            break
+
+    print '\n# Plugin B subscribed message dump #\n'
+
+    while True:
+        try:
+            logger.info(pprint.pformat(plugin_b.subscribe_socket
+                                       .recv_pyobj(zmq.NOBLOCK)))
+        except zmq.Again:
+            break
 
     hub_process.terminate()
