@@ -1,3 +1,9 @@
+import cPickle as pickle
+from datetime import datetime
+import copy
+import uuid
+
+import yaml
 import jsonschema
 
 
@@ -64,6 +70,11 @@ MESSAGE_SCHEMA = {
                   {'command': {'description':
                                'Command to be executed by the target',
                                'type': 'string'},
+                   'data': {'type': 'object',
+                            'description': 'The execution arguments.'},
+                   'metadata': {'type': 'object',
+                                'description': 'Contains any metadata that '
+                                'describes the output.'},
                    'silent': {'type': 'boolean',
                               'description': 'A boolean flag which, if True, '
                               'signals the plugin to execute this code as '
@@ -102,9 +113,14 @@ MESSAGE_SCHEMA = {
                    'execution_count':
                    {'type': 'number',
                     'description': 'The execution counter that increases by one'
-                    ' with each request.'}},
-                  'required': ['status', 'execution_count']},
-                 'error': {'$ref': '#/definitions/error'}}}],
+                    ' with each request.'},
+                   'data': {'type': 'object',
+                            'description': 'The execution result.'},
+                   'metadata': {'type': 'object',
+                                'description': 'Contains any metadata that '
+                                'describes the output.'},
+                   'error': {'$ref': '#/definitions/error'}},
+                  'required': ['status', 'execution_count']}}}],
      'required': ['content']},
     'connect_request':
     {'description': 'Request to get basic information about the plugin hub, '
@@ -120,20 +136,19 @@ MESSAGE_SCHEMA = {
                   {'command': {'type': 'object',
                                'properties': {'uri': {'type': 'string'},
                                               'port': {'type': 'number'},
-                                              'name': {'type': 'string'}}},
+                                              'name': {'type': 'string'}},
+                               'required': ['uri', 'port', 'name']},
                    'publish': {'type': 'object',
                                'properties': {'uri': {'type': 'string'},
-                                              'port': {'type':
-                                                       'number'}}}},
+                                              'port': {'type': 'number'}},
+                               'required': ['uri', 'port']}},
                   'required': ['command', 'publish']}}}],
-     'required': ['content']}
+     'required': ['content', 'parent_header']}
     },
 }
 
 
 def get_schema(definition):
-    import copy
-
     schema = copy.deepcopy(MESSAGE_SCHEMA)
     schema['allOf'] = [{'$ref': '#/definitions/%s' % definition}]
     return schema
@@ -155,3 +170,145 @@ def validate(data):
     msg_type = data['header']['msg_type']
     MESSAGE_VALIDATORS[msg_type].validate(data)
     return data
+
+
+def encode_data_content(data, mime_type='application/python-pickle'):
+    content = {}
+
+    if data is not None:
+        if mime_type == 'application/python-pickle':
+            # Pickle object.
+            content['data'] = pickle.dumps(data)
+        elif mime_type == 'application/x-yaml':
+            content['data'] = yaml.dumps(data)
+        elif mime_type is None or mime_type in ('application/octet-stream',
+                                                'application/json',
+                                                'text/plain'):
+            content['data'] = data
+
+        if mime_type is not None:
+            content['metadata'] = {'mime_type': mime_type}
+    return content
+
+
+def get_header(source, target, message_type, session=None):
+    return {'msg_id': str(uuid.uuid4()),
+            'session' : session or str(uuid.uuid4()),
+            'date': datetime.now().isoformat(),
+            'source': source,
+            'target': target,
+            'msg_type': message_type,
+            'version': '0.2'}
+
+
+def get_connect_request(source, target):
+    '''
+    Construct a `connect_request` message.
+
+    Args:
+
+        source (str) : Source name/ZMQ identifier.
+        target (str) : Target name/ZMQ identifier.
+
+    Returns:
+
+        (dict) : A `connect_request` message.
+    '''
+    header = get_header(source, target, 'connect_request')
+    return {'header': header}
+
+
+def get_connect_reply(request, content):
+    '''
+    Construct a `connect_reply` message.
+
+    Args:
+
+        request (dict) : The `connect_request` message corresponding to the
+            reply.
+        content (dict) : The content of the reply.
+
+    Returns:
+
+        (dict) : A `connect_reply` message.
+    '''
+    header = get_header(request['header']['target'],
+                        request['header']['source'],
+                        'connect_reply',
+                        session=request['header']['session'])
+    return {'header': header,
+            'parent_header': request['header'],
+            'content': content}
+
+
+def get_execute_request(source, target, command, data=None,
+                        mime_type='application/python-pickle', silent=False,
+                        stop_on_error=False):
+    '''
+    Construct an `execute_request` message.
+
+    Args:
+
+        source (str) : Source name/ZMQ identifier.
+        target (str) : Target name/ZMQ identifier.
+        command (str) : Name of command to execute.
+        data (dict) : Keyword arguments to command.
+        mime_type (dict) : Mime-type of requested data serialization format.
+            By default, data is serialized using `pickle`.
+        silent (bool) : A boolean flag which, if `True`, signals the plugin to
+            execute this code as quietly as possible. If `silent=True`, reply
+            will *not*: broadcast output on the IOPUB channel, or have an
+            `execute_result`.
+        stop_on_error (bool) : A boolean flag, which, if `True`, does not abort
+            the execution queue, if an exception is encountered. This allows
+            the queued execution of multiple `execute_request` messages, even
+            if they generate exceptions.
+
+    Returns:
+
+        (dict) : An `execute_request` message.
+    '''
+    header = get_header(source, target, 'execute_request')
+    content = {'command': command, 'silent': silent,
+               'stop_on_error': stop_on_error}
+    content.update(encode_data_content(data, mime_type=mime_type))
+    return {'header': header, 'content': content}
+
+
+def get_execute_reply(request, execution_count, status='ok', error=None,
+                      data=None, mime_type='application/python-pickle'):
+    '''
+    Construct an `execute_reply` message.
+
+    Args:
+
+        request (dict) : The `execute_request` message corresponding to the
+            reply.
+        execution_count (int) : The number execution requests processed by
+            plugin, including the request corresponding to the reply.
+        status (str) : One of `'ok', 'error', 'abort'`.
+        error (exception) : Exception encountered during processing of request
+            (if applicable).
+        data (dict) : Result data.
+        mime_type (dict) : Mime-type of requested data serialization format.
+            By default, data is serialized using `pickle`.
+
+    Returns:
+
+        (dict) : An `execute_reply` message.
+    '''
+    header = get_header(request['header']['target'],
+                        request['header']['source'],
+                        'execute_reply',
+                        session=request['header']['session'])
+    if status == 'error' and error is None:
+        raise ValueError('If status is "error", `error` must be provided.')
+    content = {'execution_count': execution_count,
+               'status': status}
+    content.update(encode_data_content(data, mime_type=mime_type))
+
+    if error is not None:
+        content['error'] = str(error)
+    return {'header': header,
+            'parent_header': request['header'],
+            'content': content}
