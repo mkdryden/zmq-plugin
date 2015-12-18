@@ -70,8 +70,7 @@ MESSAGE_SCHEMA = {
                   {'command': {'description':
                                'Command to be executed by the target',
                                'type': 'string'},
-                   'data': {'type': 'object',
-                            'description': 'The execution arguments.'},
+                   'data': {'description': 'The execution arguments.'},
                    'metadata': {'type': 'object',
                                 'description': 'Contains any metadata that '
                                 'describes the output.'},
@@ -114,8 +113,7 @@ MESSAGE_SCHEMA = {
                    {'type': 'number',
                     'description': 'The execution counter that increases by one'
                     ' with each request.'},
-                   'data': {'type': 'object',
-                            'description': 'The execution result.'},
+                   'data': {'description': 'The execution result.'},
                    'metadata': {'type': 'object',
                                 'description': 'Contains any metadata that '
                                 'describes the output.'},
@@ -163,16 +161,69 @@ MESSAGE_VALIDATORS = dict([(k, jsonschema.Draft4Validator(v))
                            for k, v in MESSAGE_SCHEMAS.iteritems()])
 
 
-def validate(data):
-    MESSAGE_VALIDATORS['base_message'].validate(data)
+def validate(message):
+    '''
+    Validate message against message types defined in `MESSAGE_SCHEMA`.
+
+    Args:
+
+        message (dict) : One of the message types defined in `MESSAGE_SCHEMA`.
+
+    Returns:
+
+        (dict) : Message.  A `jsonschema.ValidationError` is raised if
+            validation fails.
+    '''
+    MESSAGE_VALIDATORS['base_message'].validate(message)
 
     # Message validated as a basic message.  Now validate as specific type.
-    msg_type = data['header']['msg_type']
-    MESSAGE_VALIDATORS[msg_type].validate(data)
-    return data
+    msg_type = message['header']['msg_type']
+    MESSAGE_VALIDATORS[msg_type].validate(message)
+    return message
 
 
-def encode_data_content(data, mime_type='application/python-pickle'):
+def decode_content_data(message):
+    '''
+    Validate message and decode data from content according to mime-type.
+
+    Args:
+
+        message (dict) : One of the message types defined in `MESSAGE_SCHEMA`.
+
+    Returns:
+
+        (object) : Return deserialized object from `content['data']` field of
+            message.  A `RuntimeError` is raised if `content['error']` field is
+            set.
+    '''
+    validate(message)
+
+    error = message['content'].get('error', None)
+    if error is not None:
+        raise RuntimeError(error)
+
+    mime_type = 'application/python-pickle'
+    metadata = message['content'].get('metadata', None)
+    if metadata is not None:
+        mime_type = metadata.get('mime_type', mime_type)
+
+    data = message['content'].get('data', None)
+    if data is None:
+        return None
+    if mime_type == 'application/python-pickle':
+        # Pickle object.
+        return pickle.loads(str(data))
+    elif mime_type == 'application/x-yaml':
+        return yaml.loads(data)
+    elif mime_type == 'application/json':
+        return json.loads(data)
+    elif mime_type in ('application/octet-stream', 'text/plain'):
+        return data
+    else:
+        raise ValueError('Unrecognized mime-type: %s' % mime_type)
+
+
+def encode_content_data(data, mime_type='application/python-pickle'):
     content = {}
 
     if data is not None:
@@ -271,7 +322,7 @@ def get_execute_request(source, target, command, data=None,
     header = get_header(source, target, 'execute_request')
     content = {'command': command, 'silent': silent,
                'stop_on_error': stop_on_error}
-    content.update(encode_data_content(data, mime_type=mime_type))
+    content.update(encode_content_data(data, mime_type=mime_type))
     return {'header': header, 'content': content}
 
 
@@ -305,7 +356,7 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
         raise ValueError('If status is "error", `error` must be provided.')
     content = {'execution_count': execution_count,
                'status': status}
-    content.update(encode_data_content(data, mime_type=mime_type))
+    content.update(encode_content_data(data, mime_type=mime_type))
 
     if error is not None:
         content['error'] = str(error)

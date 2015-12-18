@@ -2,8 +2,13 @@
 from collections import OrderedDict
 import re
 import logging
+import json
+import itertools
 
 import zmq
+import jsonschema
+from .schema import (validate, get_connect_request, get_connect_reply,
+                     get_execute_request, get_execute_reply)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,7 @@ class Hub(object):
         self.reset_publish_socket()
         self.reset_query_socket()
         self.reset_command_socket()
+        self.execute_reply_id = itertools.count(1)
 
     def reset_query_socket(self):
         context = zmq.Context.instance()
@@ -72,10 +78,10 @@ class Hub(object):
         self.publish_port = self.publish_socket.bind_to_random_port(base_uri)
         self.publish_uri = base_uri + (':%s' % self.publish_port)
 
-    def query_send(self, obj):
-        self.publish_socket.send_pyobj({'msg_type': 'query_out', 'data': obj})
-        logger.debug('out %s', obj)
-        self.query_socket.send_pyobj(obj)
+    def query_send(self, message):
+        self.publish_socket.send_pyobj({'msg_type': 'query_out', 'data': message})
+        logger.debug('out %s', message)
+        self.query_socket.send(message)
 
     def command_send(self, msg_frames):
         self.publish_socket.send_pyobj({'msg_type': 'command_out',
@@ -87,26 +93,59 @@ class Hub(object):
         self.publish_socket.send_pyobj({'msg_type': 'query_in',
                                         'data': msg_frames})
         try:
-            request_code = msg_frames[0]
-            assert(request_code in ('register', 'socket_info'))
-            logger.debug('in "%s"', request_code)
-            if request_code == 'register':
-                name = msg_frames[1]
+            request = json.loads(msg_frames[0])
+            validate(request)
+        except jsonschema.ValidationError:
+            logger.error('unexpected request', exc_info=True)
+            self.reset_query_socket()
+
+        try:
+            logger.debug('in "%s"', request)
+            message_type = request['header']['msg_type']
+            if message_type == 'connect_request':
+                source = request['header']['source']
                 # Add name of client to registry.
-                self.registry[name] = name
+                self.registry[source] = source
                 # Send list of registered clients.
-                self.query_send(self.registry)
-            elif request_code == 'socket_info':
-                # Send socket info.
                 socket_info = {'command': {'uri': self.command_uri,
                                            'port': self.command_port,
                                            'name': self.name},
                                'publish': {'uri': self.publish_uri,
                                            'port': self.publish_port}}
-                self.query_send(socket_info)
-        except:
-            logger.error('unexpected message', exc_info=True)
-            self.reset_query_socket()
+                reply = get_connect_reply(request, content=socket_info)
+            elif message_type == 'execute_request':
+                func = getattr(self, 'on_execute__' +
+                               request['content']['command'], None)
+                if func is None:
+                    error = NameError('Unrecognized command: %s' %
+                                      request['content']['command'])
+                    reply = get_execute_reply(request,
+                                              self.execute_reply_id.next(),
+                                              error=error)
+                else:
+                    reply = func(request)
+
+            validate(reply)
+            self.query_send(json.dumps(reply))
+        except (Exception, ), exception:
+            if message_type == 'execute_request':
+                reply = get_execute_reply(request,
+                                          self.execute_reply_id.next(),
+                                          error=exception)
+                validate(reply)
+                self.query_send(json.dumps(reply))
+            else:
+                logger.error('Error processing request.', exc_info=True)
+                self.reset_query_socket()
+
+    def on_execute__register(self, request):
+        source = request['header']['source']
+        # Add name of client to registry.
+        self.registry[source] = source
+        logger.debug('Added "%s" to registry', source)
+        # Respond with registry contents.
+        return get_execute_reply(request, self.execute_reply_id.next(),
+                                 data={'result': self.registry})
 
     def on_command_recv(self, msg_frames):
         self.publish_socket.send_pyobj({'msg_type': 'command_in',

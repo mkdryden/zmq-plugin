@@ -4,8 +4,13 @@ import re
 import logging
 import itertools
 from collections import OrderedDict
+import json
+import cPickle as pickle
+import yaml
 
 import zmq
+from .schema import (validate, get_connect_request, get_execute_request,
+                     get_execute_reply, decode_content_data)
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +44,17 @@ class Plugin(object):
         self.command_msg_id = itertools.count()
 
         self.reset_query_socket()
-        self.hub_socket_info = self.query('socket_info')
+        connect_request = get_connect_request(self.name, 'hub')
+        reply = self.query(connect_request)
+        self.hub_socket_info = reply['content']
         self.reset_subscribe_socket()
         self.reset_command_socket()
         self.register()
 
     def register(self):
-        self.plugin_registry = self.query('register', self.name)
+        connect_request = get_execute_request(self.name, 'hub', 'register')
+        reply = self.query(connect_request)
+        self.plugin_registry = decode_content_data(reply)
         self.logger.info('Registered with hub at "%s"', self.query_uri)
 
     def reset_query_socket(self):
@@ -86,16 +95,18 @@ class Plugin(object):
         self.subscribe_socket.connect(subscribe_uri)
         self.logger.info('Connected subscribe socket to "%s"', subscribe_uri)
 
-    def query(self, request_code, *args, **kwargs):
+    def query(self, request, **kwargs):
         try:
-            self.query_socket.send_multipart([request_code] + list(args))
-            return self.query_socket.recv_pyobj(**kwargs)
+            self.query_socket.send(json.dumps(request))
+            reply = json.loads(self.query_socket.recv(**kwargs))
+            validate(reply)
+            return reply
         except:
             self.logger.error('Query error', exc_info=True)
             self.reset_query_socket()
             raise
 
-    def send_command(self, target_name, data, callback=None):
+    def send_command(self, target_name, data):
         self.command_socket.send_multipart(['hub', target_name, '',
                                             str(self.command_msg_id.next()), data])
 
