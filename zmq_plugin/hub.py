@@ -140,7 +140,7 @@ class Hub(object):
         source = request['header']['source']
         # Add name of client to registry.
         self.registry[source] = source
-        logger.debug('Added "%s" to registry', source)
+        self.logger.debug('Added "%s" to registry', source)
         # Respond with registry contents.
         return self.registry
 
@@ -171,7 +171,7 @@ class Hub(object):
             # Validate message against schema.
             validate(request)
         except jsonschema.ValidationError:
-            logger.error('unexpected request', exc_info=True)
+            self.logger.error('unexpected request', exc_info=True)
             self.reset_query_socket()
 
         try:
@@ -187,7 +187,7 @@ class Hub(object):
             reply['header']['source'] = self.name
             self.query_send(json.dumps(reply))
         except:
-            logger.error('Error processing request.', exc_info=True)
+            self.logger.error('Error processing request.', exc_info=True)
             self.reset_query_socket()
 
     def on_command_recv(self, msg_frames):
@@ -229,7 +229,7 @@ class Hub(object):
         try:
             source, null, message_str = msg_frames
         except:
-            logger.error('Unexpected message', exc_info=True)
+            self.logger.error('Unexpected message', exc_info=True)
             return
 
         try:
@@ -238,7 +238,7 @@ class Hub(object):
             # Validate message against schema.
             validate(message)
         except jsonschema.ValidationError:
-            logger.error('Unexpected message', exc_info=True)
+            self.logger.error('Unexpected message', exc_info=True)
             return
 
         # Message has been validated.  Verify message source matches header.
@@ -248,7 +248,7 @@ class Hub(object):
                                 'field (%s).' % (source,
                                                  message['header']['source']))
         except:
-            logger.error('Source mismatch.', exc_info=True)
+            self.logger.error('Source mismatch.', exc_info=True)
             return
 
         # Determine whether target is another plugin or the **hub** and process
