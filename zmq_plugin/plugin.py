@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class PluginBase(object):
-    def __init__(self, name, query_uri, subscribe=None):
+    def __init__(self, name, query_uri, subscribe_options=None):
         '''
         Plugin which can be connected to a network of other plugin instances
         through a central **hub**.
@@ -51,7 +51,7 @@ class PluginBase(object):
         self.query_uri = query_uri
         self.query_socket = None
         self.command_socket = None
-        self.subscribe = subscribe
+        self.subscribe_options = subscribe_options or {}
         self.subscribe_socket = None
         self.execute_reply_id = itertools.count(1)
 
@@ -299,8 +299,10 @@ class PluginBase(object):
 
         # Create subscribe socket and assign name as identity.
         self.subscribe_socket = zmq.Socket(context, zmq.SUB)
-        if self.subscribe is not None:
-            self.subscribe_socket.setsockopt(zmq.SUBSCRIBE, self.subscribe)
+        if self.subscribe_options:
+            for k, v in self.subscribe_options.iteritems():
+                self.subscribe_socket.setsockopt(k, v)
+                print 'set sock opt', k, v
         subscribe_uri = '%s://%s:%s' % (self.transport, self.host,
                                         self.hub_socket_info['publish']
                                         ['port'])
