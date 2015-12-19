@@ -1,4 +1,5 @@
 # coding: utf-8
+from datetime import datetime
 from collections import OrderedDict
 from pprint import pformat
 import inspect
@@ -17,8 +18,8 @@ from .schema import (validate, get_connect_request, get_execute_request,
 logger = logging.getLogger(__name__)
 
 
-class Plugin(object):
-    def __init__(self, name, query_uri):
+class PluginBase(object):
+    def __init__(self, name, query_uri, subscribe=None):
         '''
         Plugin which can be connected to a network of other plugin instances
         through a central **hub**.
@@ -46,27 +47,18 @@ class Plugin(object):
         self.transport = match.group('transport')
         self.host = match.group('host')
 
+        self.hub_name = 'hub'
         self.query_uri = query_uri
         self.query_socket = None
         self.command_socket = None
+        self.subscribe = subscribe
         self.subscribe_socket = None
         self.execute_reply_id = itertools.count(1)
 
         # Registry of functions to call upon receiving `execute_reply`
-        # messages, keyed by the `session_id` field of the
+        # messages, keyed by the `session` field of the
         # `execute_request`/`execute_reply` header.
         self.callbacks = OrderedDict()
-
-    @property
-    def logger(self):
-        '''
-        Return logger configured with a name in the following form:
-
-            <module_name>.<class_name>.<method_name>->"<self.name>"
-        '''
-        return logging.getLogger('.'.join((__name__, str(type(self).__name__),
-                                           inspect.stack()[1][3]))
-                                 + '->"%s"' % self.name)
 
     def reset(self):
         '''
@@ -81,11 +73,18 @@ class Plugin(object):
         self.execute_reply_id = itertools.count(1)
 
         self.reset_query_socket()
-        connect_request = get_connect_request(self.name, 'hub')
+
+        # Get socket info and **hub** name.
+        connect_request = get_connect_request(self.name, self.hub_name)
         reply = self.query(connect_request)
+        self.hub_name = bytes(reply['header']['source'])
         self.hub_socket_info = reply['content']
+
+        # Initialize sockets using obtained socket info.
         self.reset_subscribe_socket()
         self.reset_command_socket()
+
+        # Explicitly register with the **hub** and retrieve plugin registry.
         self.register()
 
     def register(self):
@@ -99,11 +98,15 @@ class Plugin(object):
         Note that this method is safe to execute multiple times.  This provides
         a mechanism to refresh the local plugin registry.
         '''
-        connect_request = get_execute_request(self.name, 'hub', 'register')
+        connect_request = get_execute_request(self.name, self.hub_name,
+                                              'register')
         reply = self.query(connect_request)
+        self.hub_name = reply['header']['source']
         self.plugin_registry = decode_content_data(reply)
         self.logger.info('Registered with hub at "%s"', self.query_uri)
 
+    ###########################################################################
+    # Query socket methods
     def reset_query_socket(self):
         '''
         Create and configure *query* socket (existing socket is destroyed if it
@@ -116,43 +119,6 @@ class Plugin(object):
 
         self.query_socket = zmq.Socket(context, zmq.REQ)
         self.query_socket.connect(self.query_uri)
-
-    def reset_command_socket(self):
-        '''
-        Create and configure *command* socket (existing socket is destroyed if
-        it exists).
-        '''
-        context = zmq.Context.instance()
-
-        if self.command_socket is not None:
-            self.command_socket = None
-
-        # Create command socket and assign name as identity.
-        self.command_socket = zmq.Socket(context, zmq.ROUTER)
-        self.command_socket.setsockopt(zmq.IDENTITY, bytes(self.name))
-        command_uri = '%s://%s:%s' % (self.transport, self.host,
-                                      self.hub_socket_info['command']['port'])
-        self.command_socket.connect(command_uri)
-        self.logger.info('Connected command socket to "%s"', command_uri)
-
-    def reset_subscribe_socket(self):
-        '''
-        Create and configure *subscribe* socket (existing socket is destroyed
-        if it exists).
-        '''
-        context = zmq.Context.instance()
-
-        if self.subscribe_socket is not None:
-            self.subscribe_socket = None
-
-        # Create subscribe socket and assign name as identity.
-        self.subscribe_socket = zmq.Socket(context, zmq.SUB)
-        self.subscribe_socket.setsockopt(zmq.SUBSCRIBE, '')
-        subscribe_uri = '%s://%s:%s' % (self.transport, self.host,
-                                        self.hub_socket_info['publish']
-                                        ['port'])
-        self.subscribe_socket.connect(subscribe_uri)
-        self.logger.info('Connected subscribe socket to "%s"', subscribe_uri)
 
     def query(self, request, **kwargs):
         '''
@@ -177,26 +143,40 @@ class Plugin(object):
             self.reset_query_socket()
             raise
 
-    def execute(self, target_name, command, callback=None, **kwargs):
+    @property
+    def logger(self):
         '''
-        Send request to execute the specified command to the identified target.
+        Return logger configured with a name in the following form:
 
-        Args:
-
-            target_name (str) : Name (i.e., ZeroMQ identity) of the target.
-            command (str) : Name of command to execute.
-            callback (function) : Function to call on received response.
-                Callback signature is `callback_func(reply)`, where `reply` is
-                an `execute_reply` message.
-            **kwargs (dict) : Keyword arguments for command.
-
-        Returns:
-
-            None
+            <module_name>.<class_name>.<method_name>->"<self.name>"
         '''
-        request = get_execute_request(self.name, target_name, command,
-                                      data=kwargs)
-        self.command_socket.send_multipart(['hub', '', json.dumps(request)])
+        return logging.getLogger('.'.join((__name__, str(type(self).__name__),
+                                           inspect.stack()[1][3]))
+                                 + '->"%s"' % self.name)
+
+    ###########################################################################
+    # Command socket methods
+    def reset_command_socket(self):
+        '''
+        Create and configure *command* socket (existing socket is destroyed if
+        it exists).
+        '''
+        context = zmq.Context.instance()
+
+        if self.command_socket is not None:
+            self.command_socket = None
+
+        # Create command socket and assign name as identity.
+        self.command_socket = zmq.Socket(context, zmq.ROUTER)
+        self.command_socket.setsockopt(zmq.IDENTITY, bytes(self.name))
+        command_uri = '%s://%s:%s' % (self.transport, self.host,
+                                      self.hub_socket_info['command']['port'])
+        self.command_socket.connect(command_uri)
+        self.logger.info('Connected command socket to "%s"', command_uri)
+
+    def send_command(self, request):
+        self.command_socket.send_multipart(map(str, [self.hub_name, '',
+                                                     json.dumps(request)]))
 
     def on_command_recv(self, frames):
         '''
@@ -248,17 +228,19 @@ class Plugin(object):
             None
         '''
         try:
-            session_id = reply['header']['session_id']
-            if session_id in self.callbacks:
+            session = reply['header']['session']
+            if session in self.callbacks:
                 self.logger.debug('Calling callback for session: %s',
-                                  session_id)
+                                  session)
                 # A callback was registered for the corresponding request.
+                func = self.callbacks[session]
+                # Remove callback.
+                del self.callbacks[session]
                 # Call callback with reply.
-                func = self.callbacks[session_id]
                 func(reply)
             else:
                 self.logger.warning('No callback registered for session: %s',
-                                    session_id)
+                                    session)
         except:
             self.logger.error('Processing error.', exc_info=True)
 
@@ -293,7 +275,10 @@ class Plugin(object):
                                           self.execute_reply_id.next(),
                                           error=error)
             else:
-                reply = func(request)
+                result = func(request)
+                reply = get_execute_reply(request,
+                                          self.execute_reply_id.next(),
+                                          data=result)
             validate(reply)
             reply_str = json.dumps(reply)
         except (Exception, ), exception:
@@ -303,13 +288,27 @@ class Plugin(object):
 
         self.command_socket.send_multipart(['hub', '', reply_str])
 
-    def command_recv(self, *args, **kwargs):
+    ###########################################################################
+    # Subscribe socket methods
+    def reset_subscribe_socket(self):
         '''
-        Execute a read on the command socket (`args` and `kwargs` passed
-        through to `recv_multipart` call).
+        Create and configure *subscribe* socket (existing socket is destroyed
+        if it exists).
         '''
-        frames = self.command_socket.recv_multipart(*args, **kwargs)
-        return frames
+        context = zmq.Context.instance()
+
+        if self.subscribe_socket is not None:
+            self.subscribe_socket = None
+
+        # Create subscribe socket and assign name as identity.
+        self.subscribe_socket = zmq.Socket(context, zmq.SUB)
+        if self.subscribe is not None:
+            self.subscribe_socket.setsockopt(zmq.SUBSCRIBE, self.subscribe)
+        subscribe_uri = '%s://%s:%s' % (self.transport, self.host,
+                                        self.hub_socket_info['publish']
+                                        ['port'])
+        self.subscribe_socket.connect(subscribe_uri)
+        self.logger.info('Connected subscribe socket to "%s"', subscribe_uri)
 
     def on_subscribe_recv(self, msg_frames):
         '''
@@ -335,3 +334,87 @@ class Plugin(object):
             logger.info(pformat(pickle.loads(msg_frames[0])))
         except:
             logger.error('Deserialization error', exc_info=True)
+
+    ###########################################################################
+    # Execute methods
+    def execute_async(self, target_name, command, callback=None, **kwargs):
+        '''
+        Send request to execute the specified command to the identified target.
+
+        **N.B.,** this method is non-blocking, i.e., it does not wait for a
+        response.  For a blocking wrapper around this method, see `execute`
+        method below.
+
+        Args:
+
+            target_name (str) : Name (i.e., ZeroMQ identity) of the target.
+            command (str) : Name of command to execute.
+            callback (function) : Function to call on received response.
+                Callback signature is `callback_func(reply)`, where `reply` is
+                an `execute_reply` message.  Callback is added to
+                `self.callbacks`, keyed by session identifier of request.
+            **kwargs (dict) : Keyword arguments for command.
+
+        Returns:
+
+            (str) : Session identifier for request.
+        '''
+        request = get_execute_request(self.name, target_name, command,
+                                      data=kwargs)
+        if callback is not None:
+            self.callbacks[request['header']['session']] = callback
+        self.send_command(request)
+        return request['header']['session']
+
+    def execute(self, target_name, command, timeout_s=None, **kwargs):
+        '''
+        Send request to execute the specified command to the identified target
+        and return decoded result object.
+
+        **N.B.,** this method blocking, i.e., it waits for a response.  See
+        `execute_async` method for non-blocking variant with `callback`
+        argument.
+
+        Args:
+
+            target_name (str) : Name (i.e., ZeroMQ identity) of the target.
+            command (str) : Name of command to execute.
+            **kwargs (dict) : Keyword arguments for command.
+
+        Returns:
+
+            (object) : Result from remotely executed command.
+        '''
+        # Create result object that will be updated when response is received.
+        result = {}
+
+        def _callback(reply):
+            try:
+                result['data'] = decode_content_data(reply)
+            except (Exception, ), exception:
+                result['error'] = exception
+
+        session = self.execute_async(target_name, command, callback=_callback,
+                                     **kwargs)
+
+        start = datetime.now()
+        while session in self.callbacks:
+            try:
+                msg_frames = self.command_socket.recv_multipart(zmq.NOBLOCK)
+            except zmq.Again:
+                if timeout_s is not None and ((datetime.now() -
+                                               start).total_seconds() >
+                                              timeout_s):
+                    raise IOError('Timed out waiting for response for request '
+                                  '(session="%s")' % session)
+                continue
+            self.on_command_recv(msg_frames)
+
+        if 'error' in result:
+            raise result['error']
+        return result['data']
+
+
+class Plugin(PluginBase):
+    def on_execute__ping(self, request):
+        return 'pong'
