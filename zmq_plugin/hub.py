@@ -14,6 +14,26 @@ logger = logging.getLogger(__name__)
 
 class Hub(object):
     def __init__(self, query_uri, name='hub'):
+        '''
+        Central **hub** to connect a network of plugin instances.
+
+        ## Thread-safety ##
+
+        All socket configuration, registration, etc. is performed *only* when
+        the `reset` method is called explicitly.  Thus, all sockets are created
+        in the thread that calls the `reset` method.
+
+        By creating sockets in the thread the calls `reset`, it is
+        straightforward to, for example, run a `Plugin` in a separate process
+        or thread.
+
+        Args:
+
+            query_uri (str) : The URI address of the **hub** query socket.
+                Plugins connect to the query socket to register and query
+                information about other sockets.
+            name (str) : Unique name across all plugins.
+        '''
         host_cre = re.compile(r'^(?P<transport>[^:]+)://(?P<host>[^:]+)(:(?P<port>\d+)?)')
 
         match = host_cre.search(query_uri)
@@ -31,15 +51,28 @@ class Hub(object):
         self.publish_uri = None
         self.publish_socket = None
 
+        # Registry of connected plugins.
         self.registry = OrderedDict()
 
     def reset(self):
+        '''
+        Reset the plugin state.
+
+        This includes:
+
+          - Resetting the execute reply identifier counter.
+          - Resetting the `publish`, `query`, and `command` sockets.
+        '''
         self.execute_reply_id = itertools.count(1)
         self.reset_publish_socket()
         self.reset_query_socket()
         self.reset_command_socket()
 
     def reset_query_socket(self):
+        '''
+        Create and configure *query* socket (existing socket is destroyed if it
+        exists).
+        '''
         context = zmq.Context.instance()
 
         if self.query_socket is not None:
@@ -51,6 +84,10 @@ class Hub(object):
         self.query_socket.bind(self.query_uri)
 
     def reset_command_socket(self):
+        '''
+        Create and configure *command* socket (existing socket is destroyed if
+        it exists).
+        '''
         context = zmq.Context.instance()
 
         if self.command_socket is not None:
@@ -65,6 +102,10 @@ class Hub(object):
         self.command_uri = base_uri + (':%s' % self.command_port)
 
     def reset_publish_socket(self):
+        '''
+        Create and configure *publish* socket (existing socket is destroyed if
+        it exists).
+        '''
         context = zmq.Context.instance()
 
         if self.publish_socket is not None:
@@ -94,6 +135,26 @@ class Hub(object):
         # TODO method.  However, this is **not** what we want if we are just
         # TODO routing a message from one plugin to another.
         # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        '''
+        Process validated `execute_request` message, which includes the name of
+        the command to execute.
+
+        If a method with the name `on_execute__<command>` exists, call the
+        method on the `request` and send the return value wrapped in an
+        `execute_reply` message to the source of the request.
+
+        If the no matching method exists or if an exception is encountered
+        while processing the command, send `execute_reply` message with
+        corresponding error information to the source of the request.
+
+        Args:
+
+            reply (dict) : `execute_request` message
+
+        Returns:
+
+            None
+        '''
         try:
             func = getattr(self, 'on_execute__' +
                            request['content']['command'], None)
@@ -119,6 +180,20 @@ class Hub(object):
         # TODO callback function. However, this is **not** what we want if we
         # TODO are just routing a message from one plugin to another.
         # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        '''
+        Process validated `execute_reply` message.
+
+        If a callback function was registered during the execution request call
+        the callback function on the reply message.
+
+        Args:
+
+            reply (dict) : `execute_reply` message
+
+        Returns:
+
+            None
+        '''
         try:
             session_id = reply['header']['session_id']
             if session_id in self.callbacks:
@@ -144,6 +219,52 @@ class Hub(object):
                                  data={'result': self.registry})
 
     def on_command_recv(self, msg_frames):
+        '''
+        Process multi-part message from *command* socket.
+
+        Only `execute_request` and `execute_reply` messages are expected.
+
+        Messages are expected under the following scenarios:
+
+         - `execute_request`:
+             1. A plugin submitting an execution request to another plugin.
+             2. A plugin submitting an execution request to the **hub**.
+                 * The `source` in the message header **MUST** be present in
+                   the local registry (i.e., `self.registry`) and the `target`
+                   **MUST** be equal to `self.name`.
+
+         - `execute_reply`:
+             1. A plugin responding with an execution reply to another plugin.
+                 * The `source` and `target` in the message header **MUST**
+                   both be present in the local registry (i.e.,
+                   `self.registry`).
+             2. A plugin responding with an execution reply from the **hub**.
+                 * The `source` in the message header **MUST** be present in
+                   the local registry (i.e., `self.registry`) and the `target`
+                   **MUST** be equal to `self.name`.
+
+        In case 1 for `execute_request`/`execute_reply` messages, the `source`
+        and `target` in the message header **MUST** both be present in the
+        local registry (i.e., `self.registry`).
+
+        In case 2 for `execute_request`/`execute_reply` messages, the `source`
+        in the message header **MUST** be present in the local registry (i.e.,
+        `self.registry`) and the `target` **MUST** be equal to `self.name`.
+
+        This method may, for example, be called asynchronously as a callback in
+        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
+        more details.
+
+        Args:
+
+            msg_frames (list) : Multi-part ZeroMQ message.
+
+        Returns:
+
+            None
+
+        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        '''
         self.publish_socket.send_pyobj({'msg_type': 'command_in',
                                         'data': msg_frames})
         try:
@@ -155,10 +276,30 @@ class Hub(object):
             logger.error('unexpected message', exc_info=True)
 
     def on_query_recv(self, msg_frames):
+        '''
+        Process multi-part message from query socket.
+
+        This method may, for example, be called asynchronously as a callback in
+        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
+        more details.
+
+        Args:
+
+            msg_frames (list) : Multi-part ZeroMQ message.
+
+        Returns:
+
+            None
+
+        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        '''
+        # Publish raw message frames to *publish* socket.
         self.publish_socket.send_pyobj({'msg_type': 'query_in',
                                         'data': msg_frames})
         try:
+            # Decode message from first (and only expected) frame.
             request = json.loads(msg_frames[0])
+            # Validate message against schema.
             validate(request)
         except jsonschema.ValidationError:
             logger.error('unexpected request', exc_info=True)
