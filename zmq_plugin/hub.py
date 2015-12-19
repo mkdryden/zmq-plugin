@@ -58,6 +58,11 @@ class Hub(object):
 
     @property
     def logger(self):
+        '''
+        Return logger configured with a name in the following form:
+
+            <module_name>.<class_name>.<method_name>->"<self.name>"
+        '''
         return logging.getLogger('.'.join((__name__, str(type(self).__name__),
                                            inspect.stack()[1][3]))
                                  + '->"%s"' % self.name)
@@ -186,6 +191,38 @@ class Hub(object):
             self.reset_query_socket()
 
     def on_command_recv(self, msg_frames):
+        '''
+        Process multi-part message from *command* socket.
+
+        Only `execute_request` and `execute_reply` messages are expected.
+
+        Messages are expected under the following scenarios:
+
+         1. A plugin submitting an execution request or reply to another
+            plugin.
+         2. A plugin submitting an execution request or reply to the **hub**.
+
+        In case 1, the `source` and `target` in the message header **MUST**
+        both be present in the local registry (i.e., `self.registry`).
+
+        In case 2, the `source` in the message header **MUST** be present in
+        the local registry (i.e., `self.registry`) and the `target` **MUST** be
+        equal to `self.name`.
+
+        This method may, for example, be called asynchronously as a callback in
+        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
+        more details.
+
+        Args:
+
+            msg_frames (list) : Multi-part ZeroMQ message.
+
+        Returns:
+
+            None
+
+        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        '''
         # Publish raw message frames to *publish* socket.
         self.publish_socket.send_pyobj({'msg_type': 'command_in',
                                         'data': msg_frames})
@@ -233,11 +270,43 @@ class Hub(object):
                                '**MUST** be the **hub**.')
 
     def _process__forwarding_command_message(self, message):
+        '''
+        Process validated message from *command* socket, which is addressed
+        from one plugin to another.
+
+        In addition to forwarding the message to the *target* plugin through
+        the *command* socket, the message *MUST* be published to the *publish*
+        socket.
+
+        Args:
+
+            message (dict) : Message to forward to *target*.
+
+        Returns:
+
+            None
+        '''
         msg_frames = map(str, [message['header']['target'], '',
                                json.dumps(message)])
         self.command_socket.send_multipart(msg_frames)
 
     def _process__local_command_message(self, message):
+        '''
+        Process validated message from *command* socket, where the **hub** is
+        either the *source* or the *target* (not both).
+
+        In addition to sending reply to the *target* plugin through the
+        *command* socket, the message *MUST* be published to the *publish*
+        socket.
+
+        Args:
+
+            message (dict) : Message to forward to *target*.
+
+        Returns:
+
+            None
+        '''
         message_type = message['header']['msg_type']
         if message_type == 'execute_request':
             reply = self._process__execute_request(message)
@@ -251,6 +320,18 @@ class Hub(object):
             self.logger.error('Unrecognized message type: %s', message_type)
 
     def _process__connect_request(self, request):
+        '''
+        Process validated `connect_request` message, where the source field of
+        the header is used to add the plugin to the registry.
+
+        Args:
+
+            request (dict) : `connect_request` message
+
+        Returns:
+
+            (dict) : `connect_reply` message.
+        '''
         source = request['header']['source']
         # Add name of client to registry.
         self.registry[source] = source
@@ -264,6 +345,26 @@ class Hub(object):
         return validate(reply)
 
     def _process__execute_request(self, request):
+        '''
+        Process validated `execute_request` message, which includes the name of
+        the command to execute.
+
+        If a method with the name `on_execute__<command>` exists, call the
+        method on the `request` and send the return value wrapped in an
+        `execute_reply` message to the source of the request.
+
+        If the no matching method exists or if an exception is encountered
+        while processing the command, send `execute_reply` message with
+        corresponding error information to the source of the request.
+
+        Args:
+
+            request (dict) : `execute_request` message
+
+        Returns:
+
+            (dict) : `execute_reply` message
+        '''
         try:
             func = getattr(self, 'on_execute__' +
                            request['content']['command'], None)
@@ -284,6 +385,20 @@ class Hub(object):
                                      error=exception)
 
     def _process__execute_reply(self, reply):
+        '''
+        Process validated `execute_reply` message.
+
+        If a callback function was registered during the execution request call
+        the callback function on the reply message.
+
+        Args:
+
+            reply (dict) : `execute_reply` message
+
+        Returns:
+
+            None
+        '''
         try:
             session = reply['header']['session']
             if session in self.callbacks:
