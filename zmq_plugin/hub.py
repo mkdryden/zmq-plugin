@@ -1,13 +1,15 @@
 # coding: utf-8
 from collections import OrderedDict
-import re
-import logging
-import json
+import inspect
 import itertools
+import json
+import logging
+import re
 
 import zmq
 import jsonschema
-from .schema import validate, get_connect_reply, get_execute_reply
+from .schema import (validate, get_connect_reply, get_execute_reply,
+                     encode_content_data)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,12 @@ class Hub(object):
 
         # Registry of connected plugins.
         self.registry = OrderedDict()
+
+    @property
+    def logger(self):
+        return logging.getLogger('.'.join((__name__, str(type(self).__name__),
+                                           inspect.stack()[1][3]))
+                                 + '->"%s"' % self.name)
 
     def reset(self):
         '''
@@ -123,157 +131,13 @@ class Hub(object):
         logger.debug('out %s', message)
         self.query_socket.send(message)
 
-    def command_send(self, message):
-        self.publish_socket.send_pyobj({'msg_type': 'command_out',
-                                        'data': message})
-        logger.debug('out %s', message)
-        self.command_socket.send(message)
-
-    def _process__execute_request(self, request):
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO This handler tries to match command name from request to call a
-        # TODO method.  However, this is **not** what we want if we are just
-        # TODO routing a message from one plugin to another.
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        '''
-        Process validated `execute_request` message, which includes the name of
-        the command to execute.
-
-        If a method with the name `on_execute__<command>` exists, call the
-        method on the `request` and send the return value wrapped in an
-        `execute_reply` message to the source of the request.
-
-        If the no matching method exists or if an exception is encountered
-        while processing the command, send `execute_reply` message with
-        corresponding error information to the source of the request.
-
-        Args:
-
-            reply (dict) : `execute_request` message
-
-        Returns:
-
-            None
-        '''
-        try:
-            func = getattr(self, 'on_execute__' +
-                           request['content']['command'], None)
-            if func is None:
-                error = NameError('Unrecognized command: %s' %
-                                  request['content']['command'])
-                reply = get_execute_reply(request,
-                                          self.execute_reply_id.next(),
-                                          error=error)
-            else:
-                content = func(request)
-                reply = get_execute_reply(request,
-                                          self.execute_reply_id.next(),
-                                          **content)
-            return validate(reply)
-        except (Exception, ), exception:
-            return get_execute_reply(request, self.execute_reply_id.next(),
-                                     error=exception)
-
-    def _process__execute_reply(self, reply):
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO This handler tries to match an execute reply to a registered
-        # TODO callback function. However, this is **not** what we want if we
-        # TODO are just routing a message from one plugin to another.
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        '''
-        Process validated `execute_reply` message.
-
-        If a callback function was registered during the execution request call
-        the callback function on the reply message.
-
-        Args:
-
-            reply (dict) : `execute_reply` message
-
-        Returns:
-
-            None
-        '''
-        try:
-            session_id = reply['header']['session_id']
-            if session_id in self.callbacks:
-                self.logger.debug('Calling callback for session: %s',
-                                  session_id)
-                # A callback was registered for the corresponding request.
-                # Call callback with reply.
-                func = self.callbacks[session_id]
-                func(reply)
-            else:
-                self.logger.warning('No callback registered for session: %s',
-                                    session_id)
-        except:
-            self.logger.error('Processing error.', exc_info=True)
-
     def on_execute__register(self, request):
         source = request['header']['source']
         # Add name of client to registry.
         self.registry[source] = source
         logger.debug('Added "%s" to registry', source)
         # Respond with registry contents.
-        return get_execute_reply(request, self.execute_reply_id.next(),
-                                 data={'result': self.registry})
-
-    def on_command_recv(self, msg_frames):
-        '''
-        Process multi-part message from *command* socket.
-
-        Only `execute_request` and `execute_reply` messages are expected.
-
-        Messages are expected under the following scenarios:
-
-         - `execute_request`:
-             1. A plugin submitting an execution request to another plugin.
-             2. A plugin submitting an execution request to the **hub**.
-                 * The `source` in the message header **MUST** be present in
-                   the local registry (i.e., `self.registry`) and the `target`
-                   **MUST** be equal to `self.name`.
-
-         - `execute_reply`:
-             1. A plugin responding with an execution reply to another plugin.
-                 * The `source` and `target` in the message header **MUST**
-                   both be present in the local registry (i.e.,
-                   `self.registry`).
-             2. A plugin responding with an execution reply from the **hub**.
-                 * The `source` in the message header **MUST** be present in
-                   the local registry (i.e., `self.registry`) and the `target`
-                   **MUST** be equal to `self.name`.
-
-        In case 1 for `execute_request`/`execute_reply` messages, the `source`
-        and `target` in the message header **MUST** both be present in the
-        local registry (i.e., `self.registry`).
-
-        In case 2 for `execute_request`/`execute_reply` messages, the `source`
-        in the message header **MUST** be present in the local registry (i.e.,
-        `self.registry`) and the `target` **MUST** be equal to `self.name`.
-
-        This method may, for example, be called asynchronously as a callback in
-        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
-        more details.
-
-        Args:
-
-            msg_frames (list) : Multi-part ZeroMQ message.
-
-        Returns:
-
-            None
-
-        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
-        '''
-        self.publish_socket.send_pyobj({'msg_type': 'command_in',
-                                        'data': msg_frames})
-        try:
-            logger.debug('in "%s"', msg_frames)
-            a, b, null, msg_id, msg = msg_frames
-            logger.debug('out [%s]->"%s": "%s"', msg_id, b, msg)
-            self.command_send([b, a, null, msg_id, msg])
-        except:
-            logger.error('unexpected message', exc_info=True)
+        return self.registry
 
     def on_query_recv(self, msg_frames):
         '''
@@ -309,23 +173,128 @@ class Hub(object):
             logger.debug('in "%s"', request)
             message_type = request['header']['msg_type']
             if message_type == 'connect_request':
-                source = request['header']['source']
-                # Add name of client to registry.
-                self.registry[source] = source
-                # Send list of registered clients.
-                socket_info = {'command': {'uri': self.command_uri,
-                                           'port': self.command_port,
-                                           'name': self.name},
-                               'publish': {'uri': self.publish_uri,
-                                           'port': self.publish_port}}
-                reply = get_connect_reply(request, content=socket_info)
-                validate(reply)
+                reply = self._process__connect_request(request)
             elif message_type == 'execute_request':
                 reply = self._process__execute_request(request)
             else:
                 raise RuntimeError('Unrecognized message type: %s' %
                                    message_type)
+            reply['header']['source'] = self.name
             self.query_send(json.dumps(reply))
         except:
             logger.error('Error processing request.', exc_info=True)
             self.reset_query_socket()
+
+    def on_command_recv(self, msg_frames):
+        # Publish raw message frames to *publish* socket.
+        self.publish_socket.send_pyobj({'msg_type': 'command_in',
+                                        'data': msg_frames})
+        try:
+            source, null, message_str = msg_frames
+        except:
+            logger.error('Unexpected message', exc_info=True)
+            return
+
+        try:
+            # Decode message from first (and only expected) frame.
+            message = json.loads(message_str)
+            # Validate message against schema.
+            validate(message)
+        except jsonschema.ValidationError:
+            logger.error('Unexpected message', exc_info=True)
+            return
+
+        # Message has been validated.  Verify message source matches header.
+        try:
+            if not message['header']['source'] == source:
+                raise NameError('Message source (%s) does not header source '
+                                'field (%s).' % (source,
+                                                 message['header']['source']))
+        except:
+            logger.error('Source mismatch.', exc_info=True)
+            return
+
+        # Determine whether target is another plugin or the **hub** and process
+        # message accordingly.
+        target = message['header']['target']
+        if source in self.registry and target in self.registry:
+            # Both *source* and *target* are present in the local registry.
+            # Forward message to *target* plugin.
+            self._process__forwarding_command_message(message)
+        elif (source in self.registry and target == self.name):
+            # Message *source* is in the local registry and *target* is
+            # **hub**.
+            self._process__local_command_message(message)
+        else:
+            raise RuntimeError('Unsupported source/target configuration.  '
+                               'Either source and target both present in '
+                               'the local registry, or the source **MUST** be '
+                               'a plugin in the local registry and the target '
+                               '**MUST** be the **hub**.')
+
+    def _process__forwarding_command_message(self, message):
+        msg_frames = map(str, [message['header']['target'], '',
+                               json.dumps(message)])
+        self.command_socket.send_multipart(msg_frames)
+
+    def _process__local_command_message(self, message):
+        message_type = message['header']['msg_type']
+        if message_type == 'execute_request':
+            reply = self._process__execute_request(message)
+            msg_frames = map(str, [reply['header']['target'], '',
+                                   json.dumps(reply)])
+            self.logger.debug('Message frames: %s', msg_frames)
+            self.command_socket.send_multipart(msg_frames)
+        elif message_type == 'execute_reply':
+            self._process__execute_reply(message)
+        else:
+            self.logger.error('Unrecognized message type: %s', message_type)
+
+    def _process__connect_request(self, request):
+        source = request['header']['source']
+        # Add name of client to registry.
+        self.registry[source] = source
+        # Send list of registered clients.
+        socket_info = {'command': {'uri': self.command_uri,
+                                    'port': self.command_port,
+                                    'name': self.name},
+                       'publish': {'uri': self.publish_uri,
+                                   'port': self.publish_port}}
+        reply = get_connect_reply(request, content=socket_info)
+        return validate(reply)
+
+    def _process__execute_request(self, request):
+        try:
+            func = getattr(self, 'on_execute__' +
+                           request['content']['command'], None)
+            if func is None:
+                error = NameError('Unrecognized command: %s' %
+                                  request['content']['command'])
+                reply = get_execute_reply(request,
+                                          self.execute_reply_id.next(),
+                                          error=error)
+            else:
+                result = func(request)
+                reply = get_execute_reply(request,
+                                          self.execute_reply_id.next(),
+                                          data=result)
+            return validate(reply)
+        except (Exception, ), exception:
+            return get_execute_reply(request, self.execute_reply_id.next(),
+                                     error=exception)
+
+    def _process__execute_reply(self, reply):
+        try:
+            session = reply['header']['session']
+            if session in self.callbacks:
+                self.logger.debug('Calling callback for session: %s',
+                                  session)
+                # A callback was registered for the corresponding request.
+                # Call callback with reply.
+                func = self.callbacks[session]
+                func(reply)
+            else:
+                self.logger.warning('No callback registered for session: %s',
+                                    session)
+        except:
+            self.logger.error('Processing error.', exc_info=True)
