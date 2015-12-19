@@ -203,7 +203,6 @@ class PluginBase(object):
         except jsonschema.ValidationError:
             self.logger.error('unexpected message', exc_info=True)
 
-        self.logger.debug('in %s', frames)
         message_type = message['header']['msg_type']
         if message_type == 'execute_request':
             self._process__execute_request(message)
@@ -230,8 +229,6 @@ class PluginBase(object):
         try:
             session = reply['header']['session']
             if session in self.callbacks:
-                self.logger.debug('Calling callback for session: %s',
-                                  session)
                 # A callback was registered for the corresponding request.
                 func = self.callbacks[session]
                 # Remove callback.
@@ -239,8 +236,8 @@ class PluginBase(object):
                 # Call callback with reply.
                 func(reply)
             else:
-                self.logger.warning('No callback registered for session: %s',
-                                    session)
+                # No callback registered for session.
+                pass
         except:
             self.logger.error('Processing error.', exc_info=True)
 

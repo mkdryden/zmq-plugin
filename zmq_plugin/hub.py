@@ -133,7 +133,6 @@ class Hub(object):
 
     def query_send(self, message):
         self.publish_socket.send_pyobj({'msg_type': 'query_out', 'data': message})
-        logger.debug('out %s', message)
         self.query_socket.send(message)
 
     def on_execute__register(self, request):
@@ -175,7 +174,6 @@ class Hub(object):
             self.reset_query_socket()
 
         try:
-            logger.debug('in "%s"', request)
             message_type = request['header']['msg_type']
             if message_type == 'connect_request':
                 reply = self._process__connect_request(request)
@@ -312,7 +310,6 @@ class Hub(object):
             reply = self._process__execute_request(message)
             msg_frames = map(str, [reply['header']['target'], '',
                                    json.dumps(reply)])
-            self.logger.debug('Message frames: %s', msg_frames)
             self.command_socket.send_multipart(msg_frames)
         elif message_type == 'execute_reply':
             self._process__execute_reply(message)
@@ -402,14 +399,12 @@ class Hub(object):
         try:
             session = reply['header']['session']
             if session in self.callbacks:
-                self.logger.debug('Calling callback for session: %s',
-                                  session)
                 # A callback was registered for the corresponding request.
                 # Call callback with reply.
                 func = self.callbacks[session]
                 func(reply)
             else:
-                self.logger.warning('No callback registered for session: %s',
-                                    session)
+                # No callback registered for session.
+                pass
         except:
             self.logger.error('Processing error.', exc_info=True)
