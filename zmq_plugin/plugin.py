@@ -101,7 +101,6 @@ class PluginBase(object):
         connect_request = get_execute_request(self.name, self.hub_name,
                                               'register')
         reply = self.query(connect_request)
-        self.hub_name = reply['header']['source']
         self.plugin_registry = decode_content_data(reply)
         self.logger.info('Registered with hub at "%s"', self.query_uri)
 
@@ -283,7 +282,7 @@ class PluginBase(object):
                                       error=exception)
             reply_str = json.dumps(reply)
 
-        self.command_socket.send_multipart(['hub', '', reply_str])
+        self.command_socket.send_multipart([self.hub_name, '', reply_str])
 
     ###########################################################################
     # Subscribe socket methods
