@@ -38,8 +38,8 @@ MESSAGE_SCHEMA = {
                               'execute_request', 'execute_reply'],
                      'description': 'All recognized message type strings.'},
        'version' : {'type': 'string',
-                    'default': '0.2',
-                    'enum': ['0.2'],
+                    'default': '0.3',
+                    'enum': ['0.2', '0.3'],
                     'description': 'The message protocol version'}},
       'required': ['msg_id', 'session', 'date', 'source', 'target', 'msg_type',
                    'version']},
@@ -107,7 +107,9 @@ MESSAGE_SCHEMA = {
                 {'content':
                  {'type': 'object',
                   'properties':
-                  {'status': {'type': 'string',
+                  {'command': {'description': 'Command executed',
+                               'type': 'string'},
+                   'status': {'type': 'string',
                               'enum': ['ok', 'error', 'abort']},
                    'execution_count':
                    {'type': 'number',
@@ -118,7 +120,7 @@ MESSAGE_SCHEMA = {
                                 'description': 'Contains any metadata that '
                                 'describes the output.'},
                    'error': {'$ref': '#/definitions/error'}},
-                  'required': ['status', 'execution_count']}}}],
+                  'required': ['command', 'status', 'execution_count']}}}],
      'required': ['content']},
     'connect_request':
     {'description': 'Request to get basic information about the plugin hub, '
@@ -249,7 +251,7 @@ def get_header(source, target, message_type, session=None):
             'source': source,
             'target': target,
             'msg_type': message_type,
-            'version': '0.2'}
+            'version': '0.3'}
 
 
 def get_connect_request(source, target):
@@ -355,7 +357,8 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
     if status == 'error' and error is None:
         raise ValueError('If status is "error", `error` must be provided.')
     content = {'execution_count': execution_count,
-               'status': status}
+               'status': status,
+               'command': request['content']['command']}
     content.update(encode_content_data(data, mime_type=mime_type))
 
     if error is not None:
