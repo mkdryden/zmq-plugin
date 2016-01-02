@@ -8,8 +8,8 @@ import re
 
 import zmq
 import jsonschema
-from .schema import (validate, get_connect_reply, get_execute_reply,
-                     encode_content_data)
+from .schema import validate, get_connect_reply, get_execute_reply
+
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,6 @@ class Hub(object):
         self.publish_uri = base_uri + (':%s' % self.publish_port)
 
     def query_send(self, message):
-        self.publish_socket.send_pyobj({'msg_type': 'query_out', 'data': message})
         self.query_socket.send(message)
 
     def on_execute__register(self, request):
@@ -162,8 +161,6 @@ class Hub(object):
         [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
         '''
         # Publish raw message frames to *publish* socket.
-        self.publish_socket.send_pyobj({'msg_type': 'query_in',
-                                        'data': msg_frames})
         try:
             # Decode message from first (and only expected) frame.
             request = json.loads(msg_frames[0])
@@ -174,6 +171,7 @@ class Hub(object):
             self.reset_query_socket()
 
         try:
+            self.publish_socket.send(msg_frames[0])
             message_type = request['header']['msg_type']
             if message_type == 'connect_request':
                 reply = self._process__connect_request(request)
@@ -183,7 +181,9 @@ class Hub(object):
                 raise RuntimeError('Unrecognized message type: %s' %
                                    message_type)
             reply['header']['source'] = self.name
-            self.query_send(json.dumps(reply))
+            reply_json = json.dumps(reply)
+            self.query_send(reply_json)
+            self.publish_socket.send(reply_json)
         except:
             self.logger.error('Error processing request.', exc_info=True)
             self.reset_query_socket()
@@ -221,9 +221,6 @@ class Hub(object):
 
         [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
         '''
-        # Publish raw message frames to *publish* socket.
-        self.publish_socket.send_pyobj({'msg_type': 'command_in',
-                                        'data': msg_frames})
         try:
             source, null, message_str = msg_frames
         except:
@@ -261,11 +258,12 @@ class Hub(object):
             # **hub**.
             self._process__local_command_message(message)
         else:
-            raise RuntimeError('Unsupported source/target configuration.  '
-                               'Either source and target both present in '
-                               'the local registry, or the source **MUST** be '
-                               'a plugin in the local registry and the target '
-                               '**MUST** be the **hub**.')
+            raise RuntimeError('Unsupported source(%s)/target(%s) '
+                               'configuration.  Either source and target both '
+                               'present in the local registry, or the source '
+                               '**MUST** be a plugin in the local registry and'
+                               ' the target **MUST** be the **hub**.' %
+                               (source, target))
 
     def _process__forwarding_command_message(self, message):
         '''
@@ -284,9 +282,10 @@ class Hub(object):
 
             None
         '''
-        msg_frames = map(str, [message['header']['target'], '',
-                               json.dumps(message)])
+        message_json = json.dumps(message)
+        msg_frames = map(str, [message['header']['target'], '', message_json])
         self.command_socket.send_multipart(msg_frames)
+        self.publish_socket.send(message_json)
 
     def _process__local_command_message(self, message):
         '''
@@ -305,12 +304,15 @@ class Hub(object):
 
             None
         '''
+        message_json = json.dumps(message)
+        self.publish_socket.send(message_json)
         message_type = message['header']['msg_type']
         if message_type == 'execute_request':
             reply = self._process__execute_request(message)
-            msg_frames = map(str, [reply['header']['target'], '',
-                                   json.dumps(reply)])
+            reply_json = json.dumps(reply)
+            msg_frames = map(str, [reply['header']['target'], '', reply_json])
             self.command_socket.send_multipart(msg_frames)
+            self.publish_socket.send(reply_json)
         elif message_type == 'execute_reply':
             self._process__execute_reply(message)
         else:
