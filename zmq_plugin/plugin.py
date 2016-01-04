@@ -364,7 +364,8 @@ class PluginBase(object):
         self.send_command(request)
         return request['header']['session']
 
-    def execute(self, target_name, command, timeout_s=None, **kwargs):
+    def execute(self, target_name, command, timeout_s=None, wait_func=None,
+                **kwargs):
         '''
         Send request to execute the specified command to the identified target
         and return decoded result object.
@@ -400,11 +401,12 @@ class PluginBase(object):
             try:
                 msg_frames = self.command_socket.recv_multipart(zmq.NOBLOCK)
             except zmq.Again:
-                if timeout_s is not None and ((datetime.now() -
-                                               start).total_seconds() >
-                                              timeout_s):
+                wait_duration_s = (datetime.now() - start).total_seconds()
+                if timeout_s is not None and (wait_duration_s > timeout_s):
                     raise IOError('Timed out waiting for response for request '
                                   '(session="%s")' % session)
+                if wait_func is not None:
+                    wait_func(wait_duration_s)
                 continue
             self.on_command_recv(msg_frames)
 
