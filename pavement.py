@@ -15,7 +15,7 @@ setup(name='zmq-plugin',
       author='Christian Fobel',
       author_email='christian@fobel.net',
       url='https://github.com/wheeler-microfluidics/zmq-plugin',
-      license='GPL',
+      license='LGPLv2.1',
       packages=['zmq_plugin', ],
       # N.B., install also requires `tornado` to run `bin.hub` or `bin.plugin`
       # scripts.
