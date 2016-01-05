@@ -1,7 +1,10 @@
+# coding: utf-8
 from multiprocessing import Process
 import logging
 import sys
 
+from . import verify_tornado
+verify_tornado()
 from zmq.eventloop import ioloop, zmqstream
 
 logger = logging.getLogger(__name__)

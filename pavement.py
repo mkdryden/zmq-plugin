@@ -10,20 +10,22 @@ import version
 
 setup(name='zmq-plugin',
       version=version.getVersion(),
-      description='Add description here.',
+      description='A spoke-hub plugin framework, using 0MQ backend.',
       keywords='',
-      author='Anonymous',
-      author_email='you@mail.com',
+      author='Christian Fobel',
+      author_email='christian@fobel.net',
       url='https://github.com/wheeler-microfluidics/zmq-plugin',
       license='GPL',
       packages=['zmq_plugin', ],
-      install_requires=[],
+      # N.B., install also requires `tornado` to run `bin.hub` or `bin.plugin`
+      # scripts.
+      install_requires=['pyzmq', 'jsonschema'],
       # Install data listed in `MANIFEST.in`
       include_package_data=True)
 
 
 @task
-@needs('generate_setup', 'minilib', 'setuptools.command.sdist') 
+@needs('generate_setup', 'minilib', 'setuptools.command.sdist')
 def sdist():
     """Overrides sdist to make sure that our setup.py is generated."""
     pass
