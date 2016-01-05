@@ -16,10 +16,10 @@ setup(name='zmq-plugin',
       author_email='christian@fobel.net',
       url='https://github.com/wheeler-microfluidics/zmq-plugin',
       license='LGPLv2.1',
-      packages=['zmq_plugin', ],
+      packages=['zmq_plugin'],
       # N.B., install also requires `tornado` to run `bin.hub` or `bin.plugin`
       # scripts.
-      install_requires=['pyzmq', 'jsonschema'],
+      install_requires=['jsonschema', 'pyyaml', 'pyzmq'],
       # Install data listed in `MANIFEST.in`
       include_package_data=True)
 
