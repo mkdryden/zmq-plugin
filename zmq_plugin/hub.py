@@ -142,6 +142,9 @@ class Hub(object):
         # Respond with registry contents.
         return self.registry
 
+    def on_execute__ping(self, request):
+        return 'pong'
+
     def on_query_recv(self, msg_frames):
         '''
         Process multi-part message from query socket.

@@ -60,6 +60,15 @@ class PluginBase(object):
         # `execute_request`/`execute_reply` header.
         self.callbacks = OrderedDict()
 
+    def close(self):
+        '''
+        Close all sockets.
+        '''
+        for socket in (self.query_socket, self.command_socket,
+                       self.subscribe_socket):
+            if socket is not None:
+                socket.close()
+
     def reset(self):
         '''
         Reset the plugin state.
