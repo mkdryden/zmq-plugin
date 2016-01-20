@@ -270,12 +270,37 @@ class Hub(object):
             # **hub**.
             self._process__local_command_message(message)
         else:
-            raise RuntimeError('Unsupported source(%s)/target(%s) '
-                               'configuration.  Either source and target both '
-                               'present in the local registry, or the source '
-                               '**MUST** be a plugin in the local registry and'
-                               ' the target **MUST** be the **hub**.' %
-                               (source, target))
+            error_msg = ('Unsupported source(%s)/target(%s) '
+                         'configuration.  Either source and target both '
+                         'present in the local registry, or the source '
+                         '**MUST** be a plugin in the local registry and '
+                         'the target **MUST** be the **hub**.' % (source,
+                                                                  target))
+            logger.info(error_msg)
+            if message['header']['msg_type'] == 'execute_request':
+                # Send error response to source of execution request.
+                reply = get_execute_reply(message,
+                                          self.execute_reply_id.next(),
+                                          error=IndexError(error_msg))
+                self._send_command_message(reply)
+
+    def _send_command_message(self, message):
+        '''
+        Serialize message to json and send to target over command socket.
+
+        Args:
+
+            message (dict) : Message to send.
+
+        Returns:
+
+            (str) : Message serialized as json.  Can be used, for example, to
+                broadcast message over publish socket.
+        '''
+        message_json = json.dumps(message)
+        msg_frames = map(str, [message['header']['target'], '', message_json])
+        self.command_socket.send_multipart(msg_frames)
+        return message_json
 
     def _process__forwarding_command_message(self, message):
         '''
@@ -294,9 +319,7 @@ class Hub(object):
 
             None
         '''
-        message_json = json.dumps(message)
-        msg_frames = map(str, [message['header']['target'], '', message_json])
-        self.command_socket.send_multipart(msg_frames)
+        message_json = self._send_command_message(message)
         self.publish_socket.send_multipart(map(str,
                                                [message['header']['source'],
                                                 message['header']['target'],
@@ -329,9 +352,7 @@ class Hub(object):
         message_type = message['header']['msg_type']
         if message_type == 'execute_request':
             reply = self._process__execute_request(message)
-            reply_json = json.dumps(reply)
-            msg_frames = map(str, [reply['header']['target'], '', reply_json])
-            self.command_socket.send_multipart(msg_frames)
+            reply_json = self._send_command_message(reply)
             self.publish_socket.send_multipart(map(str,
                                                    [reply['header']['source'],
                                                     reply['header']['target'],
