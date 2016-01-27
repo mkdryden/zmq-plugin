@@ -277,7 +277,8 @@ class Hub(object):
                          'the target **MUST** be the **hub**.' % (source,
                                                                   target))
             logger.info(error_msg)
-            if message['header']['msg_type'] == 'execute_request':
+            if ((message['header']['msg_type'] == 'execute_request') and
+                    not message['content'].get('silent')):
                 # Send error response to source of execution request.
                 reply = get_execute_reply(message,
                                           self.execute_reply_id.next(),
@@ -320,11 +321,11 @@ class Hub(object):
             None
         '''
         message_json = self._send_command_message(message)
-        self.publish_socket.send_multipart(map(str,
-                                               [message['header']['source'],
-                                                message['header']['target'],
-                                                message['header']['msg_type'],
-                                                message_json]))
+        if 'content' in message and not message['content'].get('silent'):
+            msg_frames = [message['header']['source'],
+                          message['header']['target'],
+                          message['header']['msg_type'], message_json]
+            self.publish_socket.send_multipart(map(str, msg_frames))
 
     def _process__local_command_message(self, message):
         '''
@@ -344,20 +345,20 @@ class Hub(object):
             None
         '''
         message_json = json.dumps(message)
-        self.publish_socket.send_multipart(map(str,
-                                               [message['header']['source'],
-                                                message['header']['target'],
-                                                message['header']['msg_type'],
-                                                message_json]))
+        if 'content' in message and not message['content'].get('silent'):
+            msg_frames = [message['header']['source'],
+                          message['header']['target'],
+                          message['header']['msg_type'], message_json]
+            self.publish_socket.send_multipart(map(str, msg_frames))
         message_type = message['header']['msg_type']
         if message_type == 'execute_request':
             reply = self._process__execute_request(message)
             reply_json = self._send_command_message(reply)
-            self.publish_socket.send_multipart(map(str,
-                                                   [reply['header']['source'],
-                                                    reply['header']['target'],
-                                                    reply['header']['msg_type'],
-                                                    reply_json]))
+            if not message['content'].get('silent'):
+                msg_frames = [reply['header']['source'],
+                              reply['header']['target'],
+                              reply['header']['msg_type'], reply_json]
+                self.publish_socket.send_multipart(map(str, msg_frames))
         elif message_type == 'execute_reply':
             self._process__execute_reply(message)
         else:

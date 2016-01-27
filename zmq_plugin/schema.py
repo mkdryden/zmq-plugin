@@ -1,10 +1,11 @@
 import cPickle as pickle
-from datetime import datetime
 import copy
+import json
 import uuid
 
-import yaml
+import arrow
 import jsonschema
+import yaml
 
 
 # ZeroMQ Plugin message format as [json-schema][1] (inspired by
@@ -38,8 +39,8 @@ MESSAGE_SCHEMA = {
                               'execute_request', 'execute_reply'],
                      'description': 'All recognized message type strings.'},
        'version' : {'type': 'string',
-                    'default': '0.3',
-                    'enum': ['0.2', '0.3'],
+                    'default': '0.4',
+                    'enum': ['0.2', '0.3', '0.4'],
                     'description': 'The message protocol version'}},
       'required': ['msg_id', 'session', 'date', 'source', 'target', 'msg_type',
                    'version']},
@@ -77,9 +78,8 @@ MESSAGE_SCHEMA = {
                    'silent': {'type': 'boolean',
                               'description': 'A boolean flag which, if True, '
                               'signals the plugin to execute this code as '
-                              'quietly as possible. silent=True will *not*: '
-                              'broadcast output on the IOPUB channel, or have '
-                              'an `execute_result`',
+                              'quietly as possible. silent=True will *not* '
+                              'broadcast output on the IOPUB channel.',
                               'default': False},
                    'stop_on_error':
                    {'type': 'boolean',
@@ -119,6 +119,12 @@ MESSAGE_SCHEMA = {
                    'metadata': {'type': 'object',
                                 'description': 'Contains any metadata that '
                                 'describes the output.'},
+                   'silent': {'type': 'boolean',
+                              'description': 'A boolean flag which, if True, '
+                              'signals the plugin to execute this code as '
+                              'quietly as possible. silent=True will *not* '
+                              'broadcast output on the IOPUB channel.',
+                              'default': False},
                    'error': {'$ref': '#/definitions/error'}},
                   'required': ['command', 'status', 'execution_count']}}}],
      'required': ['content']},
@@ -247,11 +253,11 @@ def encode_content_data(data, mime_type='application/python-pickle'):
 def get_header(source, target, message_type, session=None):
     return {'msg_id': str(uuid.uuid4()),
             'session' : session or str(uuid.uuid4()),
-            'date': datetime.now().isoformat(),
+            'date': arrow.now().isoformat(),
             'source': source,
             'target': target,
             'msg_type': message_type,
-            'version': '0.3'}
+            'version': '0.4'}
 
 
 def get_connect_request(source, target):
@@ -310,8 +316,7 @@ def get_execute_request(source, target, command, data=None,
             By default, data is serialized using `pickle`.
         silent (bool) : A boolean flag which, if `True`, signals the plugin to
             execute this code as quietly as possible. If `silent=True`, reply
-            will *not*: broadcast output on the IOPUB channel, or have an
-            `execute_result`.
+            will *not* broadcast output on the IOPUB channel.
         stop_on_error (bool) : A boolean flag, which, if `True`, does not abort
             the execution queue, if an exception is encountered. This allows
             the queued execution of multiple `execute_request` messages, even
@@ -329,7 +334,8 @@ def get_execute_request(source, target, command, data=None,
 
 
 def get_execute_reply(request, execution_count, status='ok', error=None,
-                      data=None, mime_type='application/python-pickle'):
+                      data=None, mime_type='application/python-pickle',
+                      silent=None):
     '''
     Construct an `execute_reply` message.
 
@@ -345,6 +351,10 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
         data (dict) : Result data.
         mime_type (dict) : Mime-type of requested data serialization format.
             By default, data is serialized using `pickle`.
+        silent (bool) : A boolean flag which, if `True`, signals the plugin to
+            execute this code as quietly as possible. If `silent=True`, reply
+            will *not* broadcast output on the IOPUB channel.  If `None`,
+            silent setting from request will be used.
 
     Returns:
 
@@ -358,7 +368,9 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
         raise ValueError('If status is "error", `error` must be provided.')
     content = {'execution_count': execution_count,
                'status': status,
-               'command': request['content']['command']}
+               'command': request['content']['command'],
+               'silent': request['content'].get('silent')
+               if silent is None else silent}
     content.update(encode_content_data(data, mime_type=mime_type))
 
     if error is not None:

@@ -19,7 +19,7 @@ setup(name='zmq-plugin',
       packages=['zmq_plugin'],
       # N.B., install also requires `tornado` to run `bin.hub` or `bin.plugin`
       # scripts.
-      install_requires=['jsonschema', 'pyyaml', 'pyzmq'],
+      install_requires=['arrow>=0.7.0', 'jsonschema', 'pyyaml', 'pyzmq'],
       # Install data listed in `MANIFEST.in`
       include_package_data=True)
 

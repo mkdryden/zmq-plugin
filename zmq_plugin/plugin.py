@@ -344,7 +344,8 @@ class PluginBase(object):
 
     ###########################################################################
     # Execute methods
-    def execute_async(self, target_name, command, callback=None, **kwargs):
+    def execute_async(self, target_name, command, callback=None, silent=False,
+                      **kwargs):
         '''
         Send request to execute the specified command to the identified target.
 
@@ -360,6 +361,9 @@ class PluginBase(object):
                 Callback signature is `callback_func(reply)`, where `reply` is
                 an `execute_reply` message.  Callback is added to
                 `self.callbacks`, keyed by session identifier of request.
+            silent (bool) : A boolean flag which, if `True`, signals the plugin
+                to execute this code as quietly as possible. If `silent=True`,
+                reply will *not* broadcast output on the IOPUB channel.
             **kwargs (dict) : Keyword arguments for command.
 
         Returns:
@@ -367,14 +371,14 @@ class PluginBase(object):
             (str) : Session identifier for request.
         '''
         request = get_execute_request(self.name, target_name, command,
-                                      data=kwargs)
+                                      data=kwargs, silent=silent)
         if callback is not None:
             self.callbacks[request['header']['session']] = callback
         self.send_command(request)
         return request['header']['session']
 
     def execute(self, target_name, command, timeout_s=None, wait_func=None,
-                **kwargs):
+                silent=False, **kwargs):
         '''
         Send request to execute the specified command to the identified target
         and return decoded result object.
@@ -403,7 +407,7 @@ class PluginBase(object):
                 result['error'] = exception
 
         session = self.execute_async(target_name, command, callback=_callback,
-                                     **kwargs)
+                                     silent=silent, **kwargs)
 
         start = datetime.now()
         while session in self.callbacks:
