@@ -345,7 +345,7 @@ class PluginBase(object):
     ###########################################################################
     # Execute methods
     def execute_async(self, target_name, command, callback=None, silent=False,
-                      **kwargs):
+                      extra_kwargs=None, **kwargs):
         '''
         Send request to execute the specified command to the identified target.
 
@@ -370,6 +370,8 @@ class PluginBase(object):
 
             (str) : Session identifier for request.
         '''
+        if extra_kwargs is not None:
+            kwargs.update(extra_kwargs)
         request = get_execute_request(self.name, target_name, command,
                                       data=kwargs, silent=silent)
         if callback is not None:
@@ -378,7 +380,7 @@ class PluginBase(object):
         return request['header']['session']
 
     def execute(self, target_name, command, timeout_s=None, wait_func=None,
-                silent=False, **kwargs):
+                silent=False, extra_kwargs=None, **kwargs):
         '''
         Send request to execute the specified command to the identified target
         and return decoded result object.
@@ -407,7 +409,8 @@ class PluginBase(object):
                 result['error'] = exception
 
         session = self.execute_async(target_name, command, callback=_callback,
-                                     silent=silent, **kwargs)
+                                     silent=silent, extra_kwargs=extra_kwargs,
+                                     **kwargs)
 
         start = datetime.now()
         while session in self.callbacks:
