@@ -241,11 +241,14 @@ class Hub(object):
 
         try:
             # Decode message from first (and only expected) frame.
-            message = json.loads(message_str)
+            message = json.loads(message_str, encoding='utf-8')
             # Validate message against schema.
             validate(message)
         except jsonschema.ValidationError:
             self.logger.error('Unexpected message', exc_info=True)
+            return
+        except UnicodeDecodeError:
+            import pdb; pdb.set_trace()
             return
 
         # Message has been validated.  Verify message source matches header.

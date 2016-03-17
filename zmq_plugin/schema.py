@@ -1,3 +1,4 @@
+import base64
 import cPickle as pickle
 import copy
 import json
@@ -11,8 +12,11 @@ import yaml
 # ZeroMQ Plugin message format as [json-schema][1] (inspired by
 # [IPython messaging format][2]).
 #
+# See [here][3] for information on content transfer encodings.
+#
 # [1]: https://python-jsonschema.readthedocs.org/en/latest/
 # [2]: http://jupyter-client.readthedocs.org/en/latest/messaging.html#messaging
+# [3]: https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
 MESSAGE_SCHEMA = {
     'definitions':
     {'unique_id': {'type': 'string', 'description': 'Typically UUID'},
@@ -39,8 +43,8 @@ MESSAGE_SCHEMA = {
                               'execute_request', 'execute_reply'],
                      'description': 'All recognized message type strings.'},
        'version' : {'type': 'string',
-                    'default': '0.4',
-                    'enum': ['0.2', '0.3', '0.4'],
+                    'default': '0.5',
+                    'enum': ['0.2', '0.3', '0.4', '0.5'],
                     'description': 'The message protocol version'}},
       'required': ['msg_id', 'session', 'date', 'source', 'target', 'msg_type',
                    'version']},
@@ -56,7 +60,10 @@ MESSAGE_SCHEMA = {
         'clients can track where messages come from.',
         '$ref': '#/definitions/header'},
        'metadata': {'type': 'object',
-                    'description': 'Any metadata associated with the message.'},
+                    'description': 'Any metadata associated with the message.',
+                    'properties': {'transfer_encoding':
+                                   {'type': 'string',
+                                    'default': '8bit'}}},
        'content': {'type': 'object',
                    'description': 'The actual content of the message must be a '
                    'dict, whose structure depends on the message type.'}},
@@ -211,16 +218,27 @@ def decode_content_data(message):
         raise RuntimeError(error)
 
     mime_type = 'application/python-pickle'
+    transfer_encoding = 'BASE64'
     metadata = message['content'].get('metadata', None)
     if metadata is not None:
         mime_type = metadata.get('mime_type', mime_type)
+        transfer_encoding = metadata.get('transfer_encoding',
+                                         transfer_encoding)
 
     data = message['content'].get('data', None)
+
     if data is None:
         return None
+
+    # If content data was base64 encoded, decode it.
+    #
+    # [1]: https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
+    if transfer_encoding == 'BASE64':
+        data = base64.b64decode(data)
+
     if mime_type == 'application/python-pickle':
         # Pickle object.
-        return pickle.loads(str(data))
+        return pickle.loads(data)
     elif mime_type == 'application/x-yaml':
         return yaml.loads(data)
     elif mime_type == 'application/json':
@@ -231,19 +249,26 @@ def decode_content_data(message):
         raise ValueError('Unrecognized mime-type: %s' % mime_type)
 
 
-def encode_content_data(data, mime_type='application/python-pickle'):
+def encode_content_data(data, mime_type='application/python-pickle',
+                        transfer_encoding='BASE64'):
     content = {}
 
     if data is not None:
         if mime_type == 'application/python-pickle':
             # Pickle object.
-            content['data'] = pickle.dumps(data)
+            content['data'] = pickle.dumps(data, protocol=-1)
         elif mime_type == 'application/x-yaml':
             content['data'] = yaml.dumps(data)
         elif mime_type is None or mime_type in ('application/octet-stream',
                                                 'application/json',
                                                 'text/plain'):
             content['data'] = data
+
+        # Encode content data as base64, if necessary.
+        #
+        # [1]: https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
+        if transfer_encoding == 'BASE64':
+            content['data'] = base64.b64encode(content['data'])
 
         if mime_type is not None:
             content['metadata'] = {'mime_type': mime_type}
@@ -301,7 +326,8 @@ def get_connect_reply(request, content):
 
 
 def get_execute_request(source, target, command, data=None,
-                        mime_type='application/python-pickle', silent=False,
+                        mime_type='application/python-pickle',
+                        transfer_encoding='BASE64', silent=False,
                         stop_on_error=False):
     '''
     Construct an `execute_request` message.
@@ -329,13 +355,14 @@ def get_execute_request(source, target, command, data=None,
     header = get_header(source, target, 'execute_request')
     content = {'command': command, 'silent': silent,
                'stop_on_error': stop_on_error}
-    content.update(encode_content_data(data, mime_type=mime_type))
+    content.update(encode_content_data(data, mime_type=mime_type,
+                                       transfer_encoding=transfer_encoding))
     return {'header': header, 'content': content}
 
 
 def get_execute_reply(request, execution_count, status='ok', error=None,
                       data=None, mime_type='application/python-pickle',
-                      silent=None):
+                      transfer_encoding='BASE64', silent=None):
     '''
     Construct an `execute_reply` message.
 
@@ -371,7 +398,8 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
                'command': request['content']['command'],
                'silent': request['content'].get('silent')
                if silent is None else silent}
-    content.update(encode_content_data(data, mime_type=mime_type))
+    content.update(encode_content_data(data, mime_type=mime_type,
+                                       transfer_encoding=transfer_encoding))
 
     if error is not None:
         content['error'] = str(error)

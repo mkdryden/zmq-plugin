@@ -287,8 +287,11 @@ class PluginBase(object):
             validate(reply)
             reply_str = json.dumps(reply)
         except (Exception, ), exception:
+            import traceback
+
             reply = get_execute_reply(request, self.execute_reply_id.next(),
-                                      error=exception)
+                                      error=traceback.format_exc())
+                                      #error=exception)
             reply_str = json.dumps(reply)
 
         self.command_socket.send_multipart([self.hub_name, '', reply_str])
