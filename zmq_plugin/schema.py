@@ -406,3 +406,19 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
     return {'header': header,
             'parent_header': request['header'],
             'content': content}
+
+
+########################################################################
+
+
+def mime_type(mime_type_override=None):
+    '''
+    Decorator to specify mime type of return type.
+
+    The ``mime_type`` attribute of the function is set accordingly.
+    '''
+    # Assume `mime_type` used as a decorator with call brackets.
+    def mime_type_closure(function):
+        function.mime_type = mime_type_override
+        return function
+    return mime_type_closure

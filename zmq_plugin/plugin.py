@@ -12,7 +12,7 @@ import jsonschema
 import zmq
 
 from .schema import (validate, get_connect_request, get_execute_request,
-                     get_execute_reply, decode_content_data)
+                     get_execute_reply, decode_content_data, mime_type)
 
 # Create module-level logger.
 logger = logging.getLogger(__name__)
@@ -274,16 +274,19 @@ class PluginBase(object):
             func = getattr(self, 'on_execute__' +
                            request['content']['command'], None)
             if func is None:
+                data = None
                 error = NameError('Unrecognized command: %s' %
                                   request['content']['command'])
-                reply = get_execute_reply(request,
-                                          self.execute_reply_id.next(),
-                                          error=error)
+                mime_type = None
             else:
-                result = func(request)
-                reply = get_execute_reply(request,
-                                          self.execute_reply_id.next(),
-                                          data=result)
+                data = func(request)
+                # If no `mime_type` was specified, pickle data.
+                mime_type = getattr(func, 'mime_type',
+                                    'application/python-pickle')
+                error = None
+            reply = get_execute_reply(request, self.execute_reply_id.next(),
+                                      data=data, error=error,
+                                      mime_type=mime_type)
             validate(reply)
             reply_str = json.dumps(reply)
         except (Exception, ), exception:
@@ -435,5 +438,6 @@ class PluginBase(object):
 
 
 class Plugin(PluginBase):
+    @mime_type('text/plain')
     def on_execute__ping(self, request):
         return 'pong'
