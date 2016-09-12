@@ -149,11 +149,13 @@ MESSAGE_SCHEMA = {
                  {'type': 'object',
                   'properties':
                   {'command': {'type': 'object',
+                               'description': 'Command socket information.',
                                'properties': {'uri': {'type': 'string'},
                                               'port': {'type': 'number'},
                                               'name': {'type': 'string'}},
                                'required': ['uri', 'port', 'name']},
                    'publish': {'type': 'object',
+                               'description': 'Publish socket information.',
                                'properties': {'uri': {'type': 'string'},
                                               'port': {'type': 'number'}},
                                'required': ['uri', 'port']}},
