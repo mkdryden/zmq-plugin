@@ -180,16 +180,18 @@ MESSAGE_VALIDATORS = dict([(k, jsonschema.Draft4Validator(v))
 
 def validate(message):
     '''
-    Validate message against message types defined in `MESSAGE_SCHEMA`.
+    Validate message against message types defined in :data:`MESSAGE_SCHEMA`.
 
-    Args:
+    Parameters
+    ----------
+    message : dict
+        One of the message types defined in :data:`MESSAGE_SCHEMA`.
 
-        message (dict) : One of the message types defined in `MESSAGE_SCHEMA`.
-
-    Returns:
-
-        (dict) : Message.  A `jsonschema.ValidationError` is raised if
-            validation fails.
+    Returns
+    -------
+    dict
+        Message.  A :class:`jsonschema.ValidationError` is raised if validation
+        fails.
     '''
     MESSAGE_VALIDATORS['base_message'].validate(message)
 
@@ -203,15 +205,20 @@ def decode_content_data(message):
     '''
     Validate message and decode data from content according to mime-type.
 
-    Args:
+    Parameters
+    ----------
+    message : dict
+        One of the message types defined in :data:`MESSAGE_SCHEMA`.
 
-        message (dict) : One of the message types defined in `MESSAGE_SCHEMA`.
+    Returns
+    -------
+    object
+        Return deserialized object from ``content['data']`` field of message.
 
-    Returns:
-
-        (object) : Return deserialized object from `content['data']` field of
-            message.  A `RuntimeError` is raised if `content['error']` field is
-            set.
+    Raises
+    ------
+    RuntimeError
+        If ``content['error']`` field is set.
     '''
     validate(message)
 
@@ -278,6 +285,26 @@ def encode_content_data(data, mime_type='application/python-pickle',
 
 
 def get_header(source, target, message_type, session=None):
+    '''
+    Construct message header.
+
+    Parameters
+    ----------
+    source : str
+        Source name/ZMQ identifier.
+    target : str
+        Target name/ZMQ identifier.
+    message_type : str
+        Type of message, one of ``'connect_request'``, ``'connect_reply'``,
+        ``'execute_request'``, ``'execute_reply'``.
+    session : str, optional
+        Unique session identifier (automatically created if not provided).
+
+    Returns
+    -------
+    dict
+        Message header including unique message identifier and timestamp.
+    '''
     return {'msg_id': str(uuid.uuid4()),
             'session' : session or str(uuid.uuid4()),
             'date': arrow.now().isoformat(),
@@ -289,7 +316,7 @@ def get_header(source, target, message_type, session=None):
 
 def get_connect_request(source, target):
     '''
-    Construct a `connect_request` message.
+    Construct a ``connect_request`` message.
 
     Args:
 
@@ -298,7 +325,7 @@ def get_connect_request(source, target):
 
     Returns:
 
-        (dict) : A `connect_request` message.
+        dict : A ``connect_request`` message.
     '''
     header = get_header(source, target, 'connect_request')
     return {'header': header}
@@ -306,17 +333,19 @@ def get_connect_request(source, target):
 
 def get_connect_reply(request, content):
     '''
-    Construct a `connect_reply` message.
+    Construct a ``connect_reply`` message.
 
-    Args:
+    Parameters
+    ----------
+    request : dict
+        The ``connect_request`` message corresponding to the reply.
+    content : dict
+        The content of the reply.
 
-        request (dict) : The `connect_request` message corresponding to the
-            reply.
-        content (dict) : The content of the reply.
-
-    Returns:
-
-        (dict) : A `connect_reply` message.
+    Returns
+    -------
+    dict
+        A ``connect_reply`` message.
     '''
     header = get_header(request['header']['target'],
                         request['header']['source'],
@@ -332,27 +361,36 @@ def get_execute_request(source, target, command, data=None,
                         transfer_encoding='BASE64', silent=False,
                         stop_on_error=False):
     '''
-    Construct an `execute_request` message.
+    Construct an ``execute_request`` message.
 
-    Args:
+    Parameters
+    ----------
+    source : str
+        Source name/ZMQ identifier.
+    target : str
+        Target name/ZMQ identifier.
+    command : str
+        Name of command to execute.
+    data : dict, optional
+        Keyword arguments to command.
+    mime_type : dict, optional
+        Mime-type of requested data serialization format.
 
-        source (str) : Source name/ZMQ identifier.
-        target (str) : Target name/ZMQ identifier.
-        command (str) : Name of command to execute.
-        data (dict) : Keyword arguments to command.
-        mime_type (dict) : Mime-type of requested data serialization format.
-            By default, data is serialized using `pickle`.
-        silent (bool) : A boolean flag which, if `True`, signals the plugin to
-            execute this code as quietly as possible. If `silent=True`, reply
-            will *not* broadcast output on the IOPUB channel.
-        stop_on_error (bool) : A boolean flag, which, if `True`, does not abort
-            the execution queue, if an exception is encountered. This allows
-            the queued execution of multiple `execute_request` messages, even
-            if they generate exceptions.
+        By default, data is serialized using :module:`pickle`.
+    silent : bool, optional
+        A boolean flag which, if ``True``, signals the plugin to execute this
+        code as quietly as possible.  If ``silent=True``, reply will *not*
+        broadcast output on the IOPUB channel.
+    stop_on_error : bool, optional
+        A boolean flag, which, if ``False``, does not abort the execution
+        queue, if an exception is encountered.  This allows the queued
+        execution of multiple ``execute_request`` messages, even if they
+        generate exceptions.
 
-    Returns:
-
-        (dict) : An `execute_request` message.
+    Returns
+    -------
+    dict
+        An ``execute_request`` message.
     '''
     header = get_header(source, target, 'execute_request')
     content = {'command': command, 'silent': silent,
@@ -368,26 +406,35 @@ def get_execute_reply(request, execution_count, status='ok', error=None,
     '''
     Construct an `execute_reply` message.
 
-    Args:
+    Parameters
+    ----------
+    request : dict
+        The `execute_request` message corresponding to the reply.
+    execution_count : int
+        The number execution requests processed by plugin, including the
+        request corresponding to the reply.
+    status : str, optional
+        One of `'ok', 'error', 'abort'`.
+    error : exception, optional
+        Exception encountered during processing of request (if applicable).
+    data : dict, optional
+        Result data.
+    mime_type : dict, optional
+        Mime-type of requested data serialization format.
 
-        request (dict) : The `execute_request` message corresponding to the
-            reply.
-        execution_count (int) : The number execution requests processed by
-            plugin, including the request corresponding to the reply.
-        status (str) : One of `'ok', 'error', 'abort'`.
-        error (exception) : Exception encountered during processing of request
-            (if applicable).
-        data (dict) : Result data.
-        mime_type (dict) : Mime-type of requested data serialization format.
-            By default, data is serialized using `pickle`.
-        silent (bool) : A boolean flag which, if `True`, signals the plugin to
-            execute this code as quietly as possible. If `silent=True`, reply
-            will *not* broadcast output on the IOPUB channel.  If `None`,
-            silent setting from request will be used.
+        By default, data is serialized using :module:`pickle`.
+    transfer_encoding : str, optional
+        If ``BASE64``, encode binary payload as base 64 string.
+    silent : bool, optional
+        A boolean flag which, if ``True``, signals the plugin to execute this
+        code as quietly as possible.  If ``silent=True``, reply will *not*
+        broadcast output on the IOPUB channel.  If ``None``, silent setting
+        from request will be used.
 
-    Returns:
-
-        (dict) : An `execute_reply` message.
+    Returns
+    -------
+    dict
+        An ``execute_reply`` message.
     '''
     header = get_header(request['header']['target'],
                         request['header']['source'],
