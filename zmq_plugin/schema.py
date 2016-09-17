@@ -1,3 +1,17 @@
+'''
+Attributes
+----------
+MESSAGE_SCHEMA : dict
+    ZeroMQ Plugin message format as `json-schema`_ (inspired by `IPython
+    messaging format`_).
+
+    `See here`_ for information on content transfer encodings.
+
+
+.. _`json-schema`: https://python-jsonschema.readthedocs.org/en/latest/
+.. _`IPython messaging format`: http://jupyter-client.readthedocs.org/en/latest/messaging.html#messaging
+.. _`See here`: https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
+'''
 import base64
 import cPickle as pickle
 import copy
@@ -477,12 +491,20 @@ def mime_type(mime_type_override=None):
 
 class PandasJsonEncoder(json.JSONEncoder):
     '''
-    >>>> data = pd.Series(range(10))
-    >>>> df_data = pd.DataFrame([data.copy() for i in xrange(5)])
-    >>>> combined_dump = json.dumps([df_data, data], cls=Foo)
-    >>>> loaded = json.loads(combined_dump, object_hook=object_hook)
-    >>>> assert(loaded[0].equals(df_data))
-    >>>> assert(loaded[1].equals(data))
+    Example
+    -------
+
+    >>> data = pd.Series(range(10))
+    >>> df_data = pd.DataFrame([data.copy() for i in xrange(5)])
+    >>> combined_dump = json.dumps([df_data, data], cls=PandasJsonEncoder)
+    >>> loaded = json.loads(combined_dump, object_hook=pandas_object_hook)
+    >>> assert(loaded[0].equals(df_data))
+    >>> assert(loaded[1].equals(data))
+
+    See also
+    --------
+
+    :func:`pandas_object_hook`
     '''
     def default(self, o):
         # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
@@ -531,6 +553,22 @@ class PandasJsonEncoder(json.JSONEncoder):
 
 
 def pandas_object_hook(obj):
+    '''
+    Example
+    -------
+
+    >>> data = pd.Series(range(10))
+    >>> df_data = pd.DataFrame([data.copy() for i in xrange(5)])
+    >>> combined_dump = json.dumps([df_data, data], cls=PandasJsonEncoder)
+    >>> loaded = json.loads(combined_dump, object_hook=pandas_object_hook)
+    >>> assert(loaded[0].equals(df_data))
+    >>> assert(loaded[1].equals(data))
+
+    See also
+    --------
+
+    :class:`PandasJsonEncoder`
+    '''
     # TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
     # TODO Add support for:
     # TODO  - Multi level index

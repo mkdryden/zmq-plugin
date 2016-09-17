@@ -265,8 +265,7 @@ class Hub(object):
         '''
         Process multi-part message from *command* socket.
 
-        Only :meth:`execute_request` and :meth:`execute_reply` messages are
-        expected.
+        Only ``execute_request`` and ``execute_reply`` messages are expected.
 
         Messages are expected under the following scenarios:
 
