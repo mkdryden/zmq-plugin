@@ -10,18 +10,12 @@ Welcome to zmq-plugin's documentation!
 
 -----------------
 
-API reference
-=============
+Contents:
 
-.. automodule:: zmq_plugin.create_plugin
-    :members:
-    :undoc-members:
-    :show-inheritance:
+.. toctree::
+    :maxdepth: 2
 
-.. automodule:: zmq_plugin.init_hooks
-    :members:
-    :undoc-members:
-    :show-inheritance:
+        modules <modules.rst>
 
 Indices and tables
 ==================
