@@ -1,4 +1,5 @@
 arrow>=0.7.0
 jsonschema
+pandas
 pyyaml
 pyzmq

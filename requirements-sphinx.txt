@@ -1,5 +1,6 @@
 arrow>=0.7.0
 jsonschema
 numpydoc
+pandas
 pyyaml
 pyzmq
