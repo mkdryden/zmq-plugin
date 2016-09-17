@@ -1,0 +1,5 @@
+arrow>=0.7.0
+jsonschema
+numpydoc
+pyyaml
+pyzmq

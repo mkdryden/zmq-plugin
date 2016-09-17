@@ -15,28 +15,62 @@ logger = logging.getLogger(__name__)
 
 
 class Hub(object):
+    '''
+    Central hub to connect a network of plugin instances.
+
+    Note
+    ----
+
+    **Thread-safety**
+
+    All socket configuration, registration, etc. is performed *only* when the
+    `reset` method is called explicitly.  Thus, all sockets are created in the
+    thread that calls the `reset` method.
+
+    By creating sockets in the thread the calls `reset`, it is straightforward
+    to, for example, run a `Plugin` in a separate process or thread.
+
+    Parameters
+    ----------
+    query_uri : str
+        The URI address of the **hub** query socket.
+
+        Plugins connect to the query socket to register and query information
+        about other sockets.
+    name : str
+        Unique name across all plugins.
+
+    Attributes
+    ----------
+    command_socket : zmq.Socket
+        Plugins send command requests to the command socket.
+    command_uri : str
+        The URI address of the command socket.
+
+        Command URI is determined at time of binding (bound to random port).
+    host : str
+        Host name or IP address.
+    name : str
+        Hub name (**MUST** be unique across all plugins).
+    publish_socket : zmq.Socket
+        Hub broadcasts messages to plugins over the publish socket.
+    publish_uri : str
+        The URI address of the publish socket.
+
+        Publish URI is determined at time of binding (bound to random port).
+    query_socket : zmq.Socket
+        Plugins connect to the query socket to register and query information
+        about other sockets.
+    query_uri : str
+        The URI address of the query socket.
+    registry : OrderedDict
+        Registry of connected plugins.
+    transport : str
+        Transport (e.g., "tcp", "inproc").
+    '''
     def __init__(self, query_uri, name='hub'):
-        '''
-        Central **hub** to connect a network of plugin instances.
-
-        ## Thread-safety ##
-
-        All socket configuration, registration, etc. is performed *only* when
-        the `reset` method is called explicitly.  Thus, all sockets are created
-        in the thread that calls the `reset` method.
-
-        By creating sockets in the thread the calls `reset`, it is
-        straightforward to, for example, run a `Plugin` in a separate process
-        or thread.
-
-        Args:
-
-            query_uri (str) : The URI address of the **hub** query socket.
-                Plugins connect to the query socket to register and query
-                information about other sockets.
-            name (str) : Unique name across all plugins.
-        '''
-        host_cre = re.compile(r'^(?P<transport>[^:]+)://(?P<host>[^:]+)(:(?P<port>\d+)?)')
+        host_cre = re.compile(r'^(?P<transport>[^:]+)://(?P<host>[^:]+)'
+                              r'(:(?P<port>\d+)?)')
 
         match = host_cre.search(query_uri)
         self.transport = match.group('transport')
@@ -50,6 +84,7 @@ class Hub(object):
         # Command URI is determined at time of binding (bound to random port).
         self.command_uri = None
         self.command_socket = None
+        # Publish URI is determined at time of binding (bound to random port).
         self.publish_uri = None
         self.publish_socket = None
 
@@ -58,8 +93,9 @@ class Hub(object):
 
     @property
     def logger(self):
-        '''
-        Return logger configured with a name in the following form:
+        '''logging.Logger: Class-specific logger.
+
+        Logger configured with a name in the following form::
 
             <module_name>.<class_name>.<method_name>->"<self.name>"
         '''
@@ -74,7 +110,7 @@ class Hub(object):
         This includes:
 
           - Resetting the execute reply identifier counter.
-          - Resetting the `publish`, `query`, and `command` sockets.
+          - Resetting the ``publish``, ``query``, and ``command`` sockets.
         '''
         self.execute_reply_id = itertools.count(1)
         self.reset_publish_socket()
@@ -132,9 +168,25 @@ class Hub(object):
         self.publish_uri = base_uri + (':%s' % self.publish_port)
 
     def query_send(self, message):
+        '''
+        Send message to query socket.
+
+        Parameters
+        ----------
+        message : str
+            Encoded json reply.
+        '''
         self.query_socket.send(message)
 
     def on_execute__register(self, request):
+        '''
+        Add name of client to registry and respond with registry contents.
+
+        Returns
+        -------
+        OrderedDict
+            Registry contents.
+        '''
         source = request['header']['source']
         # Add name of client to registry.
         self.registry[source] = source
@@ -143,6 +195,16 @@ class Hub(object):
         return self.registry
 
     def on_execute__ping(self, request):
+        '''
+        Send "pong" response to requesting plugin.
+
+        Useful to, for example, test connection from plugins.
+
+        Returns
+        -------
+        str
+            "pong"
+        '''
         return 'pong'
 
     def on_query_recv(self, msg_frames):
@@ -150,18 +212,17 @@ class Hub(object):
         Process multi-part message from query socket.
 
         This method may, for example, be called asynchronously as a callback in
-        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
-        more details.
+        run loop through a :obj:`zmq.eventloop.ZMQStream` configuration.
 
-        Args:
+        See `here`_ for more details.
 
-            msg_frames (list) : Multi-part ZeroMQ message.
+        Parameters
+        ----------
+        msg_frames : list
+            Multi-part ZeroMQ message.
 
-        Returns:
 
-            None
-
-        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        .. _`here`: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
         '''
         # Publish raw message frames to *publish* socket.
         try:
@@ -204,7 +265,8 @@ class Hub(object):
         '''
         Process multi-part message from *command* socket.
 
-        Only `execute_request` and `execute_reply` messages are expected.
+        Only :meth:`execute_request` and :meth:`execute_reply` messages are
+        expected.
 
         Messages are expected under the following scenarios:
 
@@ -212,26 +274,25 @@ class Hub(object):
             plugin.
          2. A plugin submitting an execution request or reply to the **hub**.
 
-        In case 1, the `source` and `target` in the message header **MUST**
-        both be present in the local registry (i.e., `self.registry`).
+        In case 1, the ``source`` and ``target`` in the message header **MUST**
+        both be present in the local registry (i.e., :attr:`registry`).
 
-        In case 2, the `source` in the message header **MUST** be present in
-        the local registry (i.e., `self.registry`) and the `target` **MUST** be
-        equal to `self.name`.
+        In case 2, the ``source`` in the message header **MUST** be present in
+        the local registry (i.e., :attr:`registry`) and the ``target`` **MUST**
+        be equal to :attr:`name`.
 
         This method may, for example, be called asynchronously as a callback in
-        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
-        more details.
+        run loop through a :obj:`zmq.eventloop.ZMQStream(...)` configuration.
 
-        Args:
+        See `here`_ for more details.
 
-            msg_frames (list) : Multi-part ZeroMQ message.
+        Parameters
+        ----------
+        msg_frames : list
+            Multi-part ZeroMQ message.
 
-        Returns:
 
-            None
-
-        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        .. _`here`: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
         '''
         try:
             source, null, message_str = msg_frames
@@ -292,14 +353,16 @@ class Hub(object):
         '''
         Serialize message to json and send to target over command socket.
 
-        Args:
+        Parameters
+        ----------
+        message : dict
+            Message to send.
 
-            message (dict) : Message to send.
-
-        Returns:
-
-            (str) : Message serialized as json.  Can be used, for example, to
-                broadcast message over publish socket.
+        Returns
+        -------
+        str
+            Message serialized as json.  Can be used, for example, to broadcast
+            message over publish socket.
         '''
         message_json = json.dumps(message)
         msg_frames = map(str, [message['header']['target'], '', message_json])
@@ -312,16 +375,13 @@ class Hub(object):
         from one plugin to another.
 
         In addition to forwarding the message to the *target* plugin through
-        the *command* socket, the message *MUST* be published to the *publish*
-        socket.
+        the *command* socket, the message **MUST** be published to the
+        *publish* socket.
 
-        Args:
-
-            message (dict) : Message to forward to *target*.
-
-        Returns:
-
-            None
+        Parameters
+        ----------
+        message : dict
+            Message to forward to *target*.
         '''
         message_json = self._send_command_message(message)
         if 'content' in message and not message['content'].get('silent'):
@@ -339,13 +399,10 @@ class Hub(object):
         *command* socket, the message *MUST* be published to the *publish*
         socket.
 
-        Args:
-
-            message (dict) : Message to forward to *target*.
-
-        Returns:
-
-            None
+        Parameters
+        ----------
+        message : dict
+            Message to forward to *target*.
         '''
         message_json = json.dumps(message)
         if 'content' in message and not message['content'].get('silent'):
@@ -372,13 +429,15 @@ class Hub(object):
         Process validated `connect_request` message, where the source field of
         the header is used to add the plugin to the registry.
 
-        Args:
+        Parameters
+        ----------
+        request : dict
+            ``connect_request`` message
 
-            request (dict) : `connect_request` message
-
-        Returns:
-
-            (dict) : `connect_reply` message.
+        Returns
+        -------
+        dict
+            ``connect_reply`` message.
         '''
         source = request['header']['source']
         # Add name of client to registry.
@@ -405,13 +464,15 @@ class Hub(object):
         while processing the command, send `execute_reply` message with
         corresponding error information to the source of the request.
 
-        Args:
+        Parameters
+        ----------
+        request : dict
+            ``execute_request`` message
 
-            request (dict) : `execute_request` message
-
-        Returns:
-
-            (dict) : `execute_reply` message
+        Returns
+        -------
+        dict
+            ``execute_reply`` message.
         '''
         try:
             func = getattr(self, 'on_execute__' +
@@ -439,13 +500,10 @@ class Hub(object):
         If a callback function was registered during the execution request call
         the callback function on the reply message.
 
-        Args:
-
-            reply (dict) : `execute_reply` message
-
-        Returns:
-
-            None
+        Parameters
+        ----------
+        reply : dict
+            ``execute_reply`` message
         '''
         try:
             session = reply['header']['session']
