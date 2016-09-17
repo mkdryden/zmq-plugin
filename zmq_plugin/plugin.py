@@ -1,7 +1,8 @@
 # coding: utf-8
-from datetime import datetime
 from collections import OrderedDict
+from datetime import datetime
 from pprint import pformat
+import cPickle as pickle
 import inspect
 import itertools
 import json
@@ -19,29 +20,68 @@ logger = logging.getLogger(__name__)
 
 
 class PluginBase(object):
+    '''
+    Plugin which can be connected to a network of other plugin instances
+    through a central **hub** (i.e., :class:`zmq_plugin.hub.Hub`).
+
+    Note
+    ----
+
+    **Thread-safety**
+
+    All socket configuration, registration, etc. is performed *only* when the
+    `reset` method is called explicitly.  Thus, all sockets are created in the
+    thread that calls the `reset` method.
+
+    By creating sockets in the thread the calls `reset`, it is straightforward
+    to, for example, run a `Plugin` in a separate process or thread.
+
+    Parameters
+    ----------
+    name : str
+        Unique name across all plugins.
+    query_uri : str
+        The URI address of the **hub** query socket.
+    subscribe_options : dict, optional
+        See :data:`subscribe_options`.
+
+    Attributes
+    ----------
+    callbacks : OrderedDict
+        Registry of functions to call upon receiving ``execute_reply``
+        messages, keyed by the ``session`` field of the
+        ``execute_request``/``execute_reply`` header.
+    command_socket : zmq.Socket
+        Used to send command requests to the **hub** command socket.
+    execute_reply_id : itertools.count
+        Reply message count iterator.
+
+        Increments by one each time a reply message is sent.
+    host : str
+        Host name or IP address.
+    hub_name : str
+        Name of hub.
+    query_socket : zmq.Socket
+        Connects to the **hub** query socket to register and query information
+        about other sockets on the **hub**.
+    query_uri : str
+        The URI address of the query socket.
+    subscribe_options : dict
+        Each ``(key, value)`` item in dictionary is applied to
+        :attr:`subscribe_socket` using the :meth:`setsockopt` method.
+
+        This is useful, for instance, to set the subscription filter.
+    subscribe_socket : zmq.Socket
+        Hub broadcasts messages to all plugins over the publish socket.
+    transport : str
+        Transport (e.g., "tcp", "inproc").
+    '''
     def __init__(self, name, query_uri, subscribe_options=None):
-        '''
-        Plugin which can be connected to a network of other plugin instances
-        through a central **hub**.
-
-        ## Thread-safety ##
-
-        All socket configuration, registration, etc. is performed *only* when
-        the `reset` method is called explicitly.  Thus, all sockets are created
-        in the thread that calls the `reset` method.
-
-        By creating sockets in the thread the calls `reset`, it is
-        straightforward to, for example, run a `Plugin` in a separate process
-        or thread.
-
-        Args:
-
-            name (str) : Unique name across all plugins.
-            query_uri (str) : The URI address of the **hub** query socket.
-        '''
         self.name = name
 
-        host_cre = re.compile(r'^(?P<transport>[^:]+)://(?P<host>[^:]+)(:(?P<port>\d+)?)')
+        host_cre = re.compile(r'^(?P<transport>[^:]+)://'
+                              r'(?P<host>[^:]+)'
+                              r'(:(?P<port>\d+)?)')
 
         match = host_cre.search(query_uri)
         self.transport = match.group('transport')
@@ -76,7 +116,8 @@ class PluginBase(object):
         This includes:
 
           - Resetting the execute reply identifier counter.
-          - Resetting the `command`, `query`, and `publish` sockets.
+          - Resetting the :attr:`command_socket`, :attr:`query_socket`, and
+            :attr:`subscribe_socket` sockets.
           - Registering with the central **hub**.
         '''
         self.execute_reply_id = itertools.count(1)
@@ -117,8 +158,8 @@ class PluginBase(object):
     # Query socket methods
     def reset_query_socket(self):
         '''
-        Create and configure *query* socket (existing socket is destroyed if it
-        exists).
+        Create and configure :attr:`query_socket` socket (existing socket is
+        destroyed if it exists).
         '''
         context = zmq.Context.instance()
 
@@ -133,13 +174,10 @@ class PluginBase(object):
         Send request message to **hub**, receive response, and return decoded
         reply message.
 
-        Args:
-
-            request (dict) : `<...>_request` message.
-
-        Returns:
-
-            None
+        Parameters
+        ----------
+        request dict
+            ``<...>_request`` message.
         '''
         try:
             self.query_socket.send(json.dumps(request))
@@ -166,8 +204,8 @@ class PluginBase(object):
     # Command socket methods
     def reset_command_socket(self):
         '''
-        Create and configure *command* socket (existing socket is destroyed if
-        it exists).
+        Create and configure :attr:`command_socket` socket (existing socket is
+        destroyed if it exists).
         '''
         context = zmq.Context.instance()
 
@@ -183,6 +221,14 @@ class PluginBase(object):
         self.logger.info('Connected command socket to "%s"', command_uri)
 
     def send_command(self, request):
+        '''
+        Send command message request through **hub**.
+
+        Parameters
+        ----------
+        request : dict
+            Command request message.
+        '''
         self.command_socket.send_multipart(map(str, [self.hub_name, '',
                                                      json.dumps(request)]))
 
@@ -191,18 +237,17 @@ class PluginBase(object):
         Process multi-part message from command socket.
 
         This method may, for example, be called asynchronously as a callback in
-        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
-        more details.
+        run loop through a :class:`zmq.eventloop.ZMQStream` configuration.
 
-        Args:
+        See `here`_ for more details.
 
-            frames (list) : Multi-part ZeroMQ message.
+        Parameters
+        ----------
+        msg_frames : list
+            Multi-part ZeroMQ message.
 
-        Returns:
 
-            None
-
-        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        .. _`here`: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
         '''
         try:
             message_str = frames[-1]
@@ -303,8 +348,8 @@ class PluginBase(object):
     # Subscribe socket methods
     def reset_subscribe_socket(self):
         '''
-        Create and configure *subscribe* socket (existing socket is destroyed
-        if it exists).
+        Create and configure :attr:`subscribe_socket` socket (existing socket
+        is destroyed if it exists).
         '''
         context = zmq.Context.instance()
 
@@ -328,21 +373,18 @@ class PluginBase(object):
         Process multi-part message from subscribe socket.
 
         This method may, for example, be called asynchronously as a callback in
-        run loop through a `ZMQStream(...)` configuration.  See [here][1] for
-        more details.
+        run loop through a :obj:`zmq.eventloop.ZMQStream` configuration.
 
-        Args:
+        See `here`_ for more details.
 
-            frames (list) : Multi-part ZeroMQ message.
+        Parameters
+        ----------
+        msg_frames : list
+            Multi-part ZeroMQ message.
 
-        Returns:
 
-            None
-
-        [1]: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+        .. _`here`: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
         '''
-        import cPickle as pickle
-
         try:
             logger.info(pformat(pickle.loads(msg_frames[0])))
         except:
@@ -359,22 +401,43 @@ class PluginBase(object):
         response.  For a blocking wrapper around this method, see `execute`
         method below.
 
-        Args:
+        Parameters
+        ----------
+        target_name : str
+            Name (i.e., ZeroMQ identity) of the target.
+        command : str
+            Name of command to execute.
+        callback : function, optional
+            Function to call on received response.
 
-            target_name (str) : Name (i.e., ZeroMQ identity) of the target.
-            command (str) : Name of command to execute.
-            callback (function) : Function to call on received response.
-                Callback signature is `callback_func(reply)`, where `reply` is
-                an `execute_reply` message.  Callback is added to
-                `self.callbacks`, keyed by session identifier of request.
-            silent (bool) : A boolean flag which, if `True`, signals the plugin
-                to execute this code as quietly as possible. If `silent=True`,
-                reply will *not* broadcast output on the IOPUB channel.
-            **kwargs (dict) : Keyword arguments for command.
+            Callback signature is ``callback_func(reply)``, where ``reply`` is
+            an ``execute_reply`` message.
 
-        Returns:
+            Callback is added to :attr:`callbacks`, keyed by session identifier
+            of request.
+        silent : bool, optional
+            A boolean flag which, if ``True``, signals the plugin to execute
+            this code as quietly as possible.
 
-            (str) : Session identifier for request.
+            If :data:`silent` is set to ``True``, reply will *not* broadcast
+            output on the IOPUB channel.
+        extra_kwargs : dict
+            Extra keyword arguments to be passed to command.
+
+            Useful to, for example, include keyword arguments whose name
+            conflict with arguments of :meth:`execute_async`/:meth:`execute`.
+        **kwargs : dict
+            Keyword arguments for command.
+
+        Returns
+        -------
+        str
+            Session identifier for request.
+
+        See also
+        --------
+
+        :meth:`execute`
         '''
         if extra_kwargs is not None:
             kwargs.update(extra_kwargs)
@@ -395,15 +458,44 @@ class PluginBase(object):
         `execute_async` method for non-blocking variant with `callback`
         argument.
 
-        Args:
+        Parameters
+        ----------
+        target_name : str
+            Name (i.e., ZeroMQ identity) of the target.
+        command : str
+            Name of command to execute.
+        timeout_s : float, optional
+            If :data:`timeout_s` is set, :class:`IOError` is raised if response
+            is not received within :data:`timeout_s` seconds.
+        wait_func : function, optional
+            If :data:`wait_func` is set, the :data:`wait_func` function is
+            called repeatedly until response is received.
 
-            target_name (str) : Name (i.e., ZeroMQ identity) of the target.
-            command (str) : Name of command to execute.
-            **kwargs (dict) : Keyword arguments for command.
+            This is useful to prevent :meth:`execute` from completely blocking
+            thread execution.
+        silent : bool, optional
+            A boolean flag which, if ``True``, signals the plugin to execute
+            this code as quietly as possible.
 
-        Returns:
+            If :data:`silent` is set to ``True``, reply will *not* broadcast
+            output on the IOPUB channel.
+        extra_kwargs : dict
+            Extra keyword arguments to be passed to command.
 
-            (object) : Result from remotely executed command.
+            Useful to, for example, include keyword arguments whose name
+            conflict with arguments of :meth:`execute_async`/:meth:`execute`.
+        **kwargs : dict
+            Keyword arguments for command.
+
+        Returns
+        -------
+        object
+            Result from remotely executed command.
+
+        See also
+        --------
+
+        :meth:`execute_async`
         '''
         # Create result object that will be updated when response is received.
         result = {}
