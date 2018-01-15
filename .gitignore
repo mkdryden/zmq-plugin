@@ -9,8 +9,6 @@ dist/*
 dist/*
 *~
 *.*~
-paver-minilib.zip
-setup.py
 *.pyc
 docs/_*
 docs/RELEASE-VERSION
