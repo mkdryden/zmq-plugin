@@ -496,6 +496,9 @@ class PluginBase(object):
         --------
 
         :meth:`execute_async`
+
+        .. versionchanged:: 0.2.1
+            Allow empty result, but log to debug level.
         '''
         # Create result object that will be updated when response is received.
         result = {}
@@ -526,7 +529,10 @@ class PluginBase(object):
 
         if 'error' in result:
             raise result['error']
-        return result['data']
+        elif 'data' in result:
+            return result['data']
+        else:
+            logger.debug('No data in response: `%s`.', result)
 
 
 class Plugin(PluginBase):
