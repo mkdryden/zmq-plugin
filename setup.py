@@ -1,12 +1,14 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+from __future__ import absolute_import
+from __future__ import print_function
+
+from setuptools import setup
 import sys
 
-from paver.easy import task, needs, path, sh, cmdopts, options
-from paver.setuputils import setup, install_distutils_tasks
-from distutils.extension import Extension
-from distutils.dep_util import newer
-
-sys.path.insert(0, path('.').abspath())
+sys.path.insert(0, '.')
 import version
+
 
 setup(name='zmq-plugin',
       version=version.getVersion(),
@@ -14,7 +16,7 @@ setup(name='zmq-plugin',
       keywords='',
       author='Christian Fobel',
       author_email='christian@fobel.net',
-      url='https://github.com/wheeler-microfluidics/zmq-plugin',
+      url='https://github.com/sci-bots/zmq-plugin',
       license='LGPLv2.1',
       packages=['zmq_plugin'],
       # N.B., install also requires `tornado` to run `bin.hub` or `bin.plugin`
@@ -23,10 +25,3 @@ setup(name='zmq-plugin',
                         'pyzmq'],
       # Install data listed in `MANIFEST.in`
       include_package_data=True)
-
-
-@task
-@needs('generate_setup', 'minilib', 'setuptools.command.sdist')
-def sdist():
-    """Overrides sdist to make sure that our setup.py is generated."""
-    pass
