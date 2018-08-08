@@ -7,11 +7,12 @@ from setuptools import setup
 import sys
 
 sys.path.insert(0, '.')
-import version
+import versioneer
 
 
 setup(name='zmq-plugin',
-      version=version.getVersion(),
+      version=versioneer.get_version(),
+      cmdclass=versioneer.get_cmdclass(),
       description='A spoke-hub plugin framework, using 0MQ backend.',
       keywords='',
       author='Christian Fobel',
