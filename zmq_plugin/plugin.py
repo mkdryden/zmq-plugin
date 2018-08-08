@@ -248,21 +248,36 @@ class PluginBase(object):
 
 
         .. _`here`: http://learning-0mq-with-pyzmq.readthedocs.org/en/latest/pyzmq/multisocket/tornadoeventloop.html
+
+
+        .. versionchanged:: 0.3.1
+            Ignore received messages which are missing a third message frame
+            and log to debug level.
         '''
+        message_str = frames[-1]
+
+        if not message_str:
+            self.logger.debug('empty message: `%s`', frames)
+            return
+
         try:
-            message_str = frames[-1]
             message = json.loads(message_str)
             validate(message)
         except jsonschema.ValidationError:
-            self.logger.error('unexpected message', exc_info=True)
-
-        message_type = message['header']['msg_type']
-        if message_type == 'execute_request':
-            self._process__execute_request(message)
-        elif message_type == 'execute_reply':
-            self._process__execute_reply(message)
+            self.logger.error('unexpected message: `%s`', message,
+                              exc_info=True)
+        except Exception:
+            self.logger.error('unexpected message: `%s`', message_str,
+                              exc_info=True)
         else:
-            self.logger.error('Unrecognized message type: %s', message_type)
+            message_type = message['header']['msg_type']
+            if message_type == 'execute_request':
+                self._process__execute_request(message)
+            elif message_type == 'execute_reply':
+                self._process__execute_reply(message)
+            else:
+                self.logger.error('Unrecognized message type: %s',
+                                  message_type)
 
     def _process__execute_reply(self, reply):
         '''
