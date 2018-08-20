@@ -554,3 +554,65 @@ class Plugin(PluginBase):
     @mime_type('text/plain')
     def on_execute__ping(self, request):
         return 'pong'
+
+
+def watch_plugin(executor, plugin, wait_duration_s=0.01, callback=None):
+    '''
+    .. versionadded:: 0.4
+
+    Launch cancellable background thread to monitor plugin socket(s).
+
+    Parameters
+    ----------
+    executor : concurrent.futures.ThreadPoolExecutor
+        Executor to use for launching background thread.
+    plugin : zmq_plugin.plugin.Plugin
+        Plugin instance (without `reset()` called yet).
+    wait_duration_s : float, optional
+        Duration (in seconds) to wait between polls of ZeroMQ socket(s).
+    callback : function, optional
+        Callback function to call after each wait duration.  If not specified,
+        process any outstanding requests on the plugin command socket.
+
+    Returns
+    -------
+    function
+        Function submitted to background thread, with attached `cancel()`
+        method to allow thread to be stopped/cancelled.
+    '''
+    import threading
+
+    from asyncio_helpers import cancellable
+    import trollius as asyncio
+
+    if callback is None:
+        def callback():
+            msg_frames = (plugin.command_socket.recv_multipart(zmq.NOBLOCK))
+            plugin.on_command_recv(msg_frames)
+
+    zmq_ready = threading.Event()
+
+    @asyncio.coroutine
+    def _check_command_socket():
+        '''
+        Process each incoming message on the ZeroMQ plugin command socket.
+
+        Stop listening if :data:`stopped` event is set.
+        '''
+        # Initialize sockets.
+        plugin.reset()
+        zmq_ready.set()
+        while True:
+            try:
+                callback()
+            except zmq.Again:
+                # No message ready.
+                yield asyncio.From(asyncio.sleep(wait_duration_s))
+            except ValueError:
+                # Message was empty or not valid JSON.
+                pass
+
+    task = cancellable(_check_command_socket)
+    executor.submit(task)
+    zmq_ready.wait()
+    return task
