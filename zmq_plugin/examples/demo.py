@@ -23,9 +23,9 @@ def run_hub(task):
     task.query_stream.on_recv(task.on_query_recv)
 
     def dump_registry():
-        print '\n' + (72 * '*') + '\n'
-        print task.registry
-        print '\n' + (72 * '*') + '\n'
+        print('\n' + (72 * '*') + '\n')
+        print(task.registry)
+        print('\n' + (72 * '*') + '\n')
 
     try:
         ioloop.install()
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     plugin_process.daemon = False
     plugin_process.start()
 
-    print '\n' + (72 * '=') + '\n'
+    print('\n' + (72 * '=') + '\n')
 
     plugin_b = Plugin('plugin_b', 'tcp://localhost:12345')
     plugin_b.reset()

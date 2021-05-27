@@ -2,7 +2,7 @@
 from collections import OrderedDict
 from datetime import datetime
 from pprint import pformat
-import cPickle as pickle
+import pickle as pickle
 import inspect
 import itertools
 import json
@@ -229,8 +229,8 @@ class PluginBase(object):
         request : dict
             Command request message.
         '''
-        self.command_socket.send_multipart(map(str, [self.hub_name, '',
-                                                     json.dumps(request)]))
+        self.command_socket.send_multipart(list(map(str, [self.hub_name, '',
+                                                     json.dumps(request)])))
 
     def on_command_recv(self, frames):
         '''
@@ -344,15 +344,15 @@ class PluginBase(object):
                 mime_type = getattr(func, 'mime_type',
                                     'application/python-pickle')
                 error = None
-            reply = get_execute_reply(request, self.execute_reply_id.next(),
+            reply = get_execute_reply(request, next(self.execute_reply_id),
                                       data=data, error=error,
                                       mime_type=mime_type)
             validate(reply)
             reply_str = json.dumps(reply)
-        except (Exception, ), exception:
+        except (Exception, ) as exception:
             import traceback
 
-            reply = get_execute_reply(request, self.execute_reply_id.next(),
+            reply = get_execute_reply(request, next(self.execute_reply_id),
                                       error=traceback.format_exc())
                                       #error=exception)
             reply_str = json.dumps(reply)
@@ -374,9 +374,9 @@ class PluginBase(object):
         # Create subscribe socket and assign name as identity.
         self.subscribe_socket = zmq.Socket(context, zmq.SUB)
         if self.subscribe_options:
-            for k, v in self.subscribe_options.iteritems():
+            for k, v in self.subscribe_options.items():
                 self.subscribe_socket.setsockopt(k, v)
-                print 'set sock opt', k, v
+                print('set sock opt', k, v)
         subscribe_uri = '%s://%s:%s' % (self.transport, self.host,
                                         self.hub_socket_info['publish']
                                         ['port'])
@@ -521,7 +521,7 @@ class PluginBase(object):
         def _callback(reply):
             try:
                 result['data'] = decode_content_data(reply)
-            except (Exception, ), exception:
+            except (Exception, ) as exception:
                 result['error'] = exception
 
         session = self.execute_async(target_name, command, callback=_callback,

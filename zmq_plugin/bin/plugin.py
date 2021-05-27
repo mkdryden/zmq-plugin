@@ -65,7 +65,7 @@ def parse_args(args=None):
                                 args.subscribe_opts.split(':')]
                                for kv in args.subscribe_opts.split(',')])
         args.subscribe_opts = dict([(getattr(zmq, k), v)
-                                    for k, v in subscribe_opts.iteritems()])
+                                    for k, v in subscribe_opts.items()])
     return args
 
 

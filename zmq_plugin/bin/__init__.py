@@ -12,6 +12,6 @@ def verify_tornado():
     try:
         import tornado
     except:
-        print >> sys.stderr, 'Package `tornado` is required.  Try `pip '\
-            'install tornado`.'
+        print('Package `tornado` is required.  Try `pip '\
+            'install tornado`.', file=sys.stderr)
         raise SystemExit

@@ -13,7 +13,7 @@ MESSAGE_SCHEMA : dict
 .. _`See here`: https://www.w3.org/Protocols/rfc1341/5_Content-Transfer-Encoding.html
 '''
 import base64
-import cPickle as pickle
+import pickle as pickle
 import copy
 import json
 import uuid
@@ -191,7 +191,7 @@ MESSAGE_SCHEMAS = dict([(k, get_schema(k)) for k in message_types])
 
 # Pre-construct a validator for each message type.
 MESSAGE_VALIDATORS = dict([(k, jsonschema.Draft4Validator(v))
-                           for k, v in MESSAGE_SCHEMAS.iteritems()])
+                           for k, v in MESSAGE_SCHEMAS.items()])
 
 
 def validate(message):
@@ -545,8 +545,7 @@ class PandasJsonEncoder(json.JSONEncoder):
                 return dict([(k, getattr(o, k)) for k in dir(o)
                               if isinstance(getattr(o, k), (int, float,
                                                             pd.Series,
-                                                            pd.DataFrame, str,
-                                                            unicode))])
+                                                            pd.DataFrame, str))])
             except:
                 pass
         return super(PandasJsonEncoder, self).default(o)

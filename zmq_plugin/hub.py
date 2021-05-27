@@ -235,12 +235,12 @@ class Hub(object):
             self.reset_query_socket()
 
         try:
-            self.publish_socket.send_multipart(map(str,
+            self.publish_socket.send_multipart(list(map(str,
                                                    [request['header']['source'],
                                                     request['header']['target'],
                                                     request['header']
                                                     ['msg_type'],
-                                                    msg_frames[0]]))
+                                                    msg_frames[0]])))
             message_type = request['header']['msg_type']
             if message_type == 'connect_request':
                 reply = self._process__connect_request(request)
@@ -252,11 +252,11 @@ class Hub(object):
             reply['header']['source'] = self.name
             reply_json = json.dumps(reply)
             self.query_send(reply_json)
-            self.publish_socket.send_multipart(map(str,
+            self.publish_socket.send_multipart(list(map(str,
                                                    [reply['header']['source'],
                                                     reply['header']['target'],
                                                     reply['header']
-                                                    ['msg_type'], reply_json]))
+                                                    ['msg_type'], reply_json])))
         except:
             self.logger.error('Error processing request.', exc_info=True)
             self.reset_query_socket()
@@ -344,7 +344,7 @@ class Hub(object):
                     not message['content'].get('silent')):
                 # Send error response to source of execution request.
                 reply = get_execute_reply(message,
-                                          self.execute_reply_id.next(),
+                                          next(self.execute_reply_id),
                                           error=IndexError(error_msg))
                 self._send_command_message(reply)
 
@@ -364,7 +364,7 @@ class Hub(object):
             message over publish socket.
         '''
         message_json = json.dumps(message)
-        msg_frames = map(str, [message['header']['target'], '', message_json])
+        msg_frames = list(map(str, [message['header']['target'], '', message_json]))
         self.command_socket.send_multipart(msg_frames)
         return message_json
 
@@ -387,7 +387,7 @@ class Hub(object):
             msg_frames = [message['header']['source'],
                           message['header']['target'],
                           message['header']['msg_type'], message_json]
-            self.publish_socket.send_multipart(map(str, msg_frames))
+            self.publish_socket.send_multipart(list(map(str, msg_frames)))
 
     def _process__local_command_message(self, message):
         '''
@@ -408,7 +408,7 @@ class Hub(object):
             msg_frames = [message['header']['source'],
                           message['header']['target'],
                           message['header']['msg_type'], message_json]
-            self.publish_socket.send_multipart(map(str, msg_frames))
+            self.publish_socket.send_multipart(list(map(str, msg_frames)))
         message_type = message['header']['msg_type']
         if message_type == 'execute_request':
             reply = self._process__execute_request(message)
@@ -417,7 +417,7 @@ class Hub(object):
                 msg_frames = [reply['header']['source'],
                               reply['header']['target'],
                               reply['header']['msg_type'], reply_json]
-                self.publish_socket.send_multipart(map(str, msg_frames))
+                self.publish_socket.send_multipart(list(map(str, msg_frames)))
         elif message_type == 'execute_reply':
             self._process__execute_reply(message)
         else:
@@ -480,16 +480,16 @@ class Hub(object):
                 error = NameError('Unrecognized command: %s' %
                                   request['content']['command'])
                 reply = get_execute_reply(request,
-                                          self.execute_reply_id.next(),
+                                          next(self.execute_reply_id),
                                           error=error)
             else:
                 result = func(request)
                 reply = get_execute_reply(request,
-                                          self.execute_reply_id.next(),
+                                          next(self.execute_reply_id),
                                           data=result)
             return validate(reply)
-        except (Exception, ), exception:
-            return get_execute_reply(request, self.execute_reply_id.next(),
+        except (Exception, ) as exception:
+            return get_execute_reply(request, next(self.execute_reply_id),
                                      error=exception)
 
     def _process__execute_reply(self, reply):
